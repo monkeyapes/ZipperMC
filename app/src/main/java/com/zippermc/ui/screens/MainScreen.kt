@@ -20,9 +20,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.GridOn
@@ -31,6 +34,7 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -39,7 +43,9 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -51,6 +57,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.zippermc.model.AnalysisResult
 import com.zippermc.model.ExtractState
 import com.zippermc.model.PackInfo
 import com.zippermc.model.ZipEntryType
@@ -67,49 +74,154 @@ fun MainScreen(viewModel: MainViewModel) {
         uri?.let { viewModel.onZipPicked(it) }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        AnimatedContent(
-            targetState = state,
-            transitionSpec = { fadeIn() togetherWith fadeOut() },
-            label = "state",
-            modifier = Modifier.fillMaxSize(),
-        ) { currentState ->
-            when (currentState) {
-                is ExtractState.Idle -> IdleContent(
-                    onPickZip = { filePicker.launch(arrayOf("*/*")) }
-                )
-                is ExtractState.Analyzing -> AnalyzingContent(currentState.fileName)
-                is ExtractState.Ready -> ReadyContent(
-                    result = currentState.result,
-                    onInstall = { viewModel.startExtract(currentState.result) },
-                    onPickAnother = { filePicker.launch(arrayOf("*/*")) },
-                )
-                is ExtractState.Extracting -> ExtractingContent(
-                    progress = currentState.progress,
-                    currentFile = currentState.currentFile,
-                )
-                is ExtractState.Success -> SuccessContent(
-                    summary = currentState.summary,
-                    onInstallAnother = { viewModel.reset(); filePicker.launch(arrayOf("*/*")) },
-                    onOpenMinecraft = {
-                        try {
-                            context.startActivity(
-                                context.packageManager.getLaunchIntentForPackage("com.mojang.minecraftpe")
-                                    ?: Intent(Intent.ACTION_MAIN).apply {
-                                        addCategory(Intent.CATEGORY_LAUNCHER)
-                                        setPackage("com.mojang.minecraftpe")
-                                    }
-                            )
-                        } catch (_: ActivityNotFoundException) {
-                            Toast.makeText(context, "Minecraft not installed", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                )
-                is ExtractState.Error -> ErrorContent(
-                    message = currentState.message,
-                    onRetry = { viewModel.reset(); filePicker.launch(arrayOf("*/*")) },
+    val folderPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        uri?.let { viewModel.onFolderPicked(it) }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.checkStorage()
+    }
+
+    when (val s = state) {
+        is ExtractState.EditingVersion -> {
+            val packs = s.result.packs
+            if (s.packIndex in packs.indices) {
+                val pack = packs[s.packIndex]
+                val (mev, pv) = viewModel.parseVersions(pack.manifestJson)
+                VersionEditorScreen(
+                    pack = pack,
+                    currentMinEngine = mev,
+                    currentPackVersion = pv,
+                    onSave = { minEng, pVer -> viewModel.saveVersionOverride(minEng, pVer) },
+                    onBack = { viewModel.cancelVersionEdit() },
                 )
             }
+        }
+        else -> {
+            Box(modifier = Modifier.fillMaxSize()) {
+                AnimatedContent(
+                    targetState = state,
+                    transitionSpec = { fadeIn() togetherWith fadeOut() },
+                    label = "state",
+                    modifier = Modifier.fillMaxSize(),
+                ) { currentState ->
+                    when (currentState) {
+                        is ExtractState.NeedsFolderPick -> FolderPickContent(
+                            onPick = { folderPicker.launch(null) },
+                        )
+                        is ExtractState.Idle -> IdleContent(
+                            onPickZip = { filePicker.launch(arrayOf("*/*")) }
+                        )
+                        is ExtractState.Analyzing -> AnalyzingContent(currentState.fileName)
+                        is ExtractState.Ready -> ReadyContent(
+                            result = currentState.result,
+                            onInstall = { viewModel.startExtract(currentState.result) },
+                            onEditVersion = { idx -> viewModel.startVersionEdit(idx) },
+                            onPickAnother = { filePicker.launch(arrayOf("*/*")) },
+                        )
+                        is ExtractState.Extracting -> ExtractingContent(
+                            progress = currentState.progress,
+                            currentFile = currentState.currentFile,
+                        )
+                        is ExtractState.Success -> SuccessContent(
+                            summary = currentState.summary,
+                            onInstallAnother = {
+                                viewModel.reset()
+                                filePicker.launch(arrayOf("*/*"))
+                            },
+                            onOpenMinecraft = {
+                                try {
+                                    context.startActivity(
+                                        context.packageManager.getLaunchIntentForPackage("com.mojang.minecraftpe")
+                                            ?: Intent(Intent.ACTION_MAIN).apply {
+                                                addCategory(Intent.CATEGORY_LAUNCHER)
+                                                setPackage("com.mojang.minecraftpe")
+                                            }
+                                    )
+                                } catch (_: ActivityNotFoundException) {
+                                    Toast.makeText(context, "Minecraft not installed", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                        )
+                        is ExtractState.Error -> ErrorContent(
+                            message = currentState.message,
+                            onRetry = {
+                                viewModel.reset()
+                                filePicker.launch(arrayOf("*/*"))
+                            },
+                        )
+                        else -> {}
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FolderPickContent(onPick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(
+            imageVector = Icons.Default.FolderOpen,
+            contentDescription = null,
+            modifier = Modifier.size(80.dp),
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(Modifier.height(16.dp))
+        Text(
+            text = "Select Minecraft Folder",
+            style = MaterialTheme.typography.headlineMedium,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "Pick the games/com.mojang/ folder so ZipperMC can install packs.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(8.dp))
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            ),
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "Navigate to:",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "Internal Storage → games → com.mojang",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "Then tap \"Allow\" or \"Select\".",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+        Button(
+            onClick = onPick,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+        ) {
+            Text("Select Folder", style = MaterialTheme.typography.labelLarge)
         }
     }
 }
@@ -176,16 +288,18 @@ private fun AnalyzingContent(fileName: String) {
 
 @Composable
 private fun ReadyContent(
-    result: com.zippermc.model.AnalysisResult,
+    result: AnalysisResult,
     onInstall: () -> Unit,
+    onEditVersion: (Int) -> Unit,
     onPickAnother: () -> Unit,
 ) {
+    val scroll = rememberScrollState()
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(32.dp),
+            .padding(24.dp)
+            .verticalScroll(scroll),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
     ) {
         Text("Ready to Install", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(16.dp))
@@ -206,7 +320,7 @@ private fun ReadyContent(
                 Spacer(Modifier.height(12.dp))
                 result.packs.forEachIndexed { i, pack ->
                     if (i > 0) Spacer(Modifier.height(8.dp))
-                    PackRow(pack)
+                    PackRow(pack, onEditVersion = { onEditVersion(i) })
                 }
                 if (result.packs.isEmpty()) {
                     Text(
@@ -241,19 +355,40 @@ private fun ReadyContent(
 }
 
 @Composable
-private fun PackRow(pack: PackInfo) {
+private fun PackRow(pack: PackInfo, onEditVersion: () -> Unit) {
     val (icon, label) = iconAndLabel(pack.type)
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            modifier = Modifier.size(20.dp),
-            tint = MaterialTheme.colorScheme.primary,
-        )
-        Spacer(Modifier.width(8.dp))
-        Column {
-            Text(pack.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-            Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(pack.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                    Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (pack.manifestJson != null) {
+                    TextButton(onClick = onEditVersion) {
+                        Icon(
+                            Icons.Default.Edit,
+                            contentDescription = "Edit Version",
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("Version", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
         }
     }
 }
@@ -323,31 +458,45 @@ private fun SuccessContent(
         Spacer(Modifier.height(16.dp))
         Text("Done!", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(8.dp))
-        Text(
-            text = "${summary.size} pack${if (summary.size != 1) "s" else ""} installed",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(16.dp))
 
-        summary.forEach { pack ->
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(vertical = 4.dp),
-            ) {
-                val (icon, label) = iconAndLabel(pack.type)
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp),
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-                Spacer(Modifier.width(8.dp))
-                Column {
-                    Text(pack.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                    Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (summary.isNotEmpty()) {
+            Text(
+                text = "${summary.size} pack${if (summary.size != 1) "s" else ""} installed",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(16.dp))
+            summary.forEach { pack ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(vertical = 4.dp),
+                ) {
+                    val (icon, label) = iconAndLabel(pack.type)
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text(pack.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
+        } else {
+            Text(
+                text = "Nothing was installed",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "The file might not contain Minecraft content.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
         Spacer(Modifier.height(24.dp))

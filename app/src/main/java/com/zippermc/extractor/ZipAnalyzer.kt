@@ -39,6 +39,7 @@ object ZipAnalyzer {
         val manifestDirs = findManifestDirs(entryNames, rootFiles, subDirs)
         for ((subPath, manifestPath) in manifestDirs) {
             val mType = readManifestType(zip, manifestPath)
+            val jsonText = readEntryText(zip, manifestPath)
             val mName = readManifestName(zip, manifestPath) ?: subPath.ifBlank { file.nameWithoutExtension }
             if (mType != null) {
                 val type = when (mType) {
@@ -46,7 +47,7 @@ object ZipAnalyzer {
                     "data" -> ZipEntryType.BEHAVIOR_PACK
                     else -> ZipEntryType.UNKNOWN
                 }
-                packs.add(PackInfo(type, mName, subPath))
+                packs.add(PackInfo(type, mName, subPath, jsonText))
             }
         }
 
@@ -128,6 +129,13 @@ object ZipAnalyzer {
             } catch (_: Exception) { null }
         }
         return readJsonField(zip, entry, "name")
+    }
+
+    private fun readEntryText(zip: ZipFile, path: String): String? {
+        return try {
+            val entry = zip.getEntry(path) ?: return null
+            zip.getInputStream(entry).bufferedReader().use { it.readText() }
+        } catch (_: Exception) { null }
     }
 
     private fun readJsonField(zip: ZipFile, entry: java.util.zip.ZipEntry, field: String): String? {
