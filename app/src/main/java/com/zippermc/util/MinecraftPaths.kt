@@ -6,7 +6,7 @@ object MinecraftPaths {
     const val WORLDS = "minecraftWorlds"
     const val SKIN_PACKS = "skin_packs"
 
-    fun folderForType(type: String): String = when (type) {
+    fun folderForType(displayName: String): String = when (displayName) {
         "Resource Pack" -> RESOURCE_PACKS
         "Behavior Pack" -> BEHAVIOR_PACKS
         "World" -> WORLDS

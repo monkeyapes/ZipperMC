@@ -1,12 +1,11 @@
 package com.zippermc.extractor
 
-import android.content.Context
 import com.zippermc.model.PackInfo
-import com.zippermc.model.ZipEntryType
 import com.zippermc.util.MinecraftPaths
 import com.zippermc.util.StorageProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
@@ -15,7 +14,6 @@ import java.util.zip.ZipFile
 object MinecraftExtractor {
 
     suspend fun extract(
-        context: Context,
         zipFile: File,
         packs: List<PackInfo>,
         versionOverrides: Map<String, String>,
@@ -27,13 +25,15 @@ object MinecraftExtractor {
         var globalCount = 0
         val installed = mutableListOf<PackInfo>()
 
+        if (!StorageProvider.ensureDirs()) {
+            throw IOException("Cannot create Minecraft folders. Make sure Minecraft has been run at least once.")
+        }
+
         for (pack in packs) {
             val typeFolder = MinecraftPaths.folderForType(pack.type.displayName)
-            if (!StorageProvider.ensureTypeDirs(context, typeFolder)) {
-                throw IOException("Cannot access Minecraft $typeFolder folder. Please re-select the Minecraft folder.")
-            }
-
             val prefix = pack.subPath.let { if (it.isBlank()) null else "$it/" }
+
+            StorageProvider.ensureTypeDir(typeFolder)
 
             val relevantEntries = if (prefix != null) {
                 allEntries.filter { it.name.startsWith(prefix) && !it.isDirectory }
@@ -45,16 +45,12 @@ object MinecraftExtractor {
 
             for ((entry, relativePath) in relevantEntries) {
                 val data = zip.getInputStream(entry).use { it.readBytes() }
-
                 val finalData = if (relativePath == "manifest.json" && pack.manifestJson != null) {
                     applyVersionOverride(pack.manifestJson, versionOverrides).toByteArray(Charsets.UTF_8)
                 } else {
                     data
                 }
-
-                if (!StorageProvider.writePackFile(context, typeFolder, pack.name, relativePath, finalData)) {
-                    throw IOException("Failed to write: $relativePath")
-                }
+                StorageProvider.writePackFile(typeFolder, pack.name, relativePath, finalData)
 
                 globalCount++
                 if (globalCount % 5 == 0 || globalCount == total) {
@@ -79,7 +75,7 @@ object MinecraftExtractor {
             overrides["min_engine_version"]?.let { versionStr ->
                 val parts = versionStr.split(".").mapNotNull { it.toIntOrNull() }
                 if (parts.size == 3) {
-                    header.put("min_engine_version", org.json.JSONArray(parts))
+                    header.put("min_engine_version", JSONArray(parts))
                     changed = true
                 }
             }
@@ -87,7 +83,7 @@ object MinecraftExtractor {
             overrides["pack_version"]?.let { versionStr ->
                 val parts = versionStr.split(".").mapNotNull { it.toIntOrNull() }
                 if (parts.size == 3) {
-                    header.put("version", org.json.JSONArray(parts))
+                    header.put("version", JSONArray(parts))
                     changed = true
                 }
             }

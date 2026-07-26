@@ -2,6 +2,8 @@ package com.zippermc.viewmodel
 
 import android.app.Application
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.zippermc.extractor.MinecraftExtractor
@@ -9,7 +11,6 @@ import com.zippermc.extractor.ZipAnalyzer
 import com.zippermc.model.AnalysisResult
 import com.zippermc.model.ExtractState
 import com.zippermc.util.FileUtils
-import com.zippermc.util.StorageProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -25,26 +26,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var currentAnalysis: AnalysisResult? = null
     private var versionOverrides = mutableMapOf<String, String>()
 
-    fun checkStorage() {
-        val ctx = getApplication<Application>()
-        if (!StorageProvider.hasTreeUri(ctx)) {
-            _state.value = ExtractState.NeedsFolderPick
-        }
-    }
+    fun hasStorageAccess(): Boolean =
+        Build.VERSION.SDK_INT < 30 || Environment.isExternalStorageManager()
 
-    fun onFolderPicked(uri: Uri) {
-        val ctx = getApplication<Application>()
-        StorageProvider.saveTreeUri(ctx, uri)
-        _state.value = ExtractState.Idle
+    fun checkPermission() {
+        if (!hasStorageAccess()) {
+            _state.value = ExtractState.NeedsPermission
+        }
     }
 
     fun onZipPicked(uri: Uri) {
-        val ctx = getApplication<Application>()
-        if (!StorageProvider.hasTreeUri(ctx)) {
-            _state.value = ExtractState.NeedsFolderPick
+        if (!hasStorageAccess()) {
+            _state.value = ExtractState.NeedsPermission
             return
         }
 
+        val ctx = getApplication<Application>()
         _state.value = ExtractState.Analyzing(FileUtils.getFileName(ctx, uri))
 
         viewModelScope.launch {
@@ -101,10 +98,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startExtract(analysis: AnalysisResult) {
         val file = cachedFile ?: return
-        val ctx = getApplication<Application>()
 
-        if (!StorageProvider.hasTreeUri(ctx)) {
-            _state.value = ExtractState.NeedsFolderPick
+        if (!hasStorageAccess()) {
+            _state.value = ExtractState.NeedsPermission
             return
         }
 
@@ -113,7 +109,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val installed = MinecraftExtractor.extract(
-                    context = ctx,
                     zipFile = file,
                     packs = analysis.packs,
                     versionOverrides = versionOverrides,

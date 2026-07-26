@@ -2,7 +2,7 @@ package com.zippermc.model
 
 sealed interface ExtractState {
     data object Idle : ExtractState
-    data object NeedsFolderPick : ExtractState
+    data object NeedsPermission : ExtractState
     data class Analyzing(val fileName: String) : ExtractState
     data class Ready(
         val result: AnalysisResult,
