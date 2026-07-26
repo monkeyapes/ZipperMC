@@ -89,7 +89,7 @@ fun MainScreen(viewModel: MainViewModel) {
     }
 
     LaunchedEffect(Unit) {
-        viewModel.scanDeviceFiles()
+        viewModel.scanAndAutoInstall()
     }
 
     when (val s = state) {

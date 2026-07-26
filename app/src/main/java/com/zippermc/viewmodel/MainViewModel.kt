@@ -35,21 +35,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _scannedFiles = MutableStateFlow<List<ScannedFile>>(emptyList())
     val scannedFiles = _scannedFiles.asStateFlow()
 
-    fun scanDeviceFiles() {
+    fun scanAndAutoInstall() {
         val ctx = getApplication<Application>()
         viewModelScope.launch {
-            val files = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val files = withContext(Dispatchers.IO) {
                 FileScanner.scan(ctx)
             }
             _scannedFiles.value = files
+            if (files.isNotEmpty() && _state.value is ExtractState.Idle) {
+                processUri(files.first().uri, autoInstall = true)
+            }
         }
     }
 
     fun onZipPicked(uri: Uri) {
-        processUri(uri)
+        processUri(uri, autoInstall = false)
     }
 
-    private fun processUri(uri: Uri) {
+    private fun processUri(uri: Uri, autoInstall: Boolean = false) {
         val ctx = getApplication<Application>()
         _state.value = ExtractState.Analyzing(FileUtils.getFileName(ctx, uri))
 
@@ -66,10 +69,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 val analysis = ZipAnalyzer.analyze(file)
                 currentAnalysis = analysis
-                _state.value = ExtractState.Ready(
-                    result = analysis,
-                    fileName = file.name,
-                )
+                if (autoInstall && analysis.packs.isNotEmpty()) {
+                    installOrSendToMinecraft(analysis)
+                } else {
+                    _state.value = ExtractState.Ready(
+                        result = analysis,
+                        fileName = file.name,
+                    )
+                }
             } catch (e: Exception) {
                 _state.value = ExtractState.Error(e.message ?: "Unknown error")
             }

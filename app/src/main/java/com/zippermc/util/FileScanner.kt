@@ -19,64 +19,92 @@ object FileScanner {
     private val EXTENSIONS = setOf(".mcaddon", ".mcpack", ".zip", ".mcworld", ".mctemplate", ".mcskin")
 
     fun scan(context: Context): List<ScannedFile> {
-        return if (Build.VERSION.SDK_INT >= 30) {
-            scanMediaStore(context)
+        val results = LinkedHashSet<ScannedFile>()
+
+        if (Build.VERSION.SDK_INT >= 30) {
+            results.addAll(scanMediaStoreDownloads(context))
+            results.addAll(scanMediaStoreFiles(context))
+            results.addAll(scanDirectPaths())
         } else {
-            scanDirectPaths(context)
+            results.addAll(scanDirectPaths())
         }
+
+        return results.toList().sortedByDescending { it.size }.take(50)
     }
 
-    private fun scanMediaStore(context: Context): List<ScannedFile> {
+    private fun scanMediaStoreDownloads(context: Context): List<ScannedFile> {
         val results = mutableListOf<ScannedFile>()
-        val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-        val projection = arrayOf(
-            MediaStore.MediaColumns._ID,
-            MediaStore.MediaColumns.DISPLAY_NAME,
-            MediaStore.MediaColumns.SIZE,
-        )
-        val selection = EXTENSIONS.joinToString(" OR ") {
-            "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
-        }
-        val args = EXTENSIONS.map { "%$it" }.toTypedArray()
-
         try {
-            context.contentResolver.query(collection, projection, selection, args, null)?.use { cursor ->
-                while (cursor.moveToNext()) {
-                    val id = cursor.getLong(0)
-                    val name = cursor.getString(1) ?: continue
-                    val size = cursor.getLong(2)
-                    val uri = Uri.withAppendedPath(collection, id.toString())
-                    results.add(ScannedFile(name, uri, size, ""))
+            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            val projection = arrayOf(
+                MediaStore.MediaColumns._ID,
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.MediaColumns.SIZE,
+            )
+            val selection = EXTENSIONS.joinToString(" OR ") {
+                "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
+            }
+            val args = EXTENSIONS.map { "%$it" }.toTypedArray()
+            context.contentResolver.query(collection, projection, selection, args, null)?.use { c ->
+                while (c.moveToNext()) {
+                    val id = c.getLong(0); val name = c.getString(1) ?: continue
+                    val size = c.getLong(2); results.add(ScannedFile(name, Uri.withAppendedPath(collection, id.toString()), size, ""))
                 }
             }
         } catch (_: Exception) {}
-
         return results
     }
 
-    private fun scanDirectPaths(@Suppress("UNUSED_PARAMETER") context: Context): List<ScannedFile> {
+    private fun scanMediaStoreFiles(context: Context): List<ScannedFile> {
+        val results = mutableListOf<ScannedFile>()
+        try {
+            val collection = MediaStore.Files.getContentUri("external")
+            val projection = arrayOf(
+                MediaStore.MediaColumns._ID,
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.MediaColumns.SIZE,
+                MediaStore.MediaColumns.DATA,
+            )
+            val selection = "(${EXTENSIONS.joinToString(" OR ") { "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?" }}) AND ${MediaStore.MediaColumns.DISPLAY_NAME} IS NOT NULL"
+            val args = EXTENSIONS.map { "%$it" }.toTypedArray()
+            context.contentResolver.query(collection, projection, selection, args, null)?.use { c ->
+                while (c.moveToNext()) {
+                    val id = c.getLong(0); val name = c.getString(1) ?: continue
+                    val size = c.getLong(2); val data = c.getString(3) ?: ""
+                    results.add(ScannedFile(name, Uri.withAppendedPath(collection, id.toString()), size, data))
+                }
+            }
+        } catch (_: Exception) {}
+        return results
+    }
+
+    private fun scanDirectPaths(): List<ScannedFile> {
         val results = mutableListOf<ScannedFile>()
         val dirs = listOfNotNull(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).parentFile?.let { File(it, "APKs") },
-            File(Environment.getExternalStorageDirectory(), "Download"),
-            File(Environment.getExternalStorageDirectory(), "APKs"),
-            File(Environment.getExternalStorageDirectory(), "downloads"),
-            Environment.getExternalStorageDirectory(),
+            try { File(Environment.getExternalStorageDirectory(), "APKs") } catch (_: Exception) { null },
+            try { File(Environment.getExternalStorageDirectory(), "Download") } catch (_: Exception) { null },
+            try { File(Environment.getExternalStorageDirectory(), "downloads") } catch (_: Exception) { null },
+            try { File(Environment.getExternalStorageDirectory(), "Minecraft") } catch (_: Exception) { null },
+            try { File(Environment.getExternalStorageDirectory(), "Games/Minecraft") } catch (_: Exception) { null },
+            try { File(Environment.getExternalStorageDirectory(), "games/com.mojang/resource_packs") } catch (_: Exception) { null },
+            try { File(Environment.getExternalStorageDirectory(), "games/com.mojang/behavior_packs") } catch (_: Exception) { null },
         )
 
         for (dir in dirs) {
-            if (!dir.isDirectory) continue
+            if (dir?.isDirectory != true) continue
             try {
-                dir.listFiles()?.forEach { file ->
+                val files = dir.listFiles()
+                if (files != null) for (file in files) {
                     if (file.isFile && EXTENSIONS.any { file.name.endsWith(it, ignoreCase = true) }) {
-                        val uri = Uri.fromFile(file)
-                        results.add(ScannedFile(file.name, uri, file.length(), file.absolutePath))
+                        try {
+                            val uri = Uri.fromFile(file)
+                            results.add(ScannedFile(file.name, uri, file.length(), file.absolutePath))
+                        } catch (_: Exception) {}
                     }
                 }
             } catch (_: Exception) {}
         }
-
         return results
     }
 }
