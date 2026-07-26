@@ -4,11 +4,14 @@ import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.zippermc.extractor.MinecraftExtractor
 import com.zippermc.extractor.ZipAnalyzer
 import com.zippermc.model.AnalysisResult
 import com.zippermc.model.ExtractState
+import com.zippermc.util.FileScanner
 import com.zippermc.util.FileUtils
 import com.zippermc.util.PackRepacker
+import com.zippermc.util.ScannedFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,6 +28,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var cachedFile: java.io.File? = null
     private var currentAnalysis: AnalysisResult? = null
     private var versionOverrides = mutableMapOf<String, String>()
+
+    private val outputIntent = MutableStateFlow<android.content.Intent?>(null)
+    val pendingIntent = outputIntent.asStateFlow()
+
+    private val _scannedFiles = MutableStateFlow<List<ScannedFile>>(emptyList())
+    val scannedFiles = _scannedFiles.asStateFlow()
+
+    fun scanDeviceFiles() {
+        val ctx = getApplication<Application>()
+        viewModelScope.launch {
+            val files = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                FileScanner.scan(ctx)
+            }
+            _scannedFiles.value = files
+        }
+    }
 
     fun onZipPicked(uri: Uri) {
         processUri(uri)
@@ -87,24 +106,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun sendToMinecraft(analysis: AnalysisResult) {
+    fun installOrSendToMinecraft(analysis: AnalysisResult) {
         val file = cachedFile ?: run {
             _state.value = ExtractState.Error("No file loaded")
             return
         }
 
-        _state.value = ExtractState.Repacking(analysis.fileName)
+        _state.value = ExtractState.Installing(0f, "")
 
         viewModelScope.launch {
             try {
-                withContext(Dispatchers.IO) {
-                    PackRepacker.repack(file, versionOverrides)
+                val installed = MinecraftExtractor.extract(
+                    zipFile = file,
+                    packs = analysis.packs,
+                    versionOverrides = versionOverrides,
+                    onProgress = { progress, current ->
+                        _state.value = ExtractState.Installing(progress, current)
+                    },
+                )
+                _state.value = ExtractState.Success(summary = installed)
+            } catch (_: Exception) {
+                // Direct write failed — fallback to sending to Minecraft via intent
+                try {
+                    val repacked = withContext(Dispatchers.IO) {
+                        PackRepacker.repack(file, versionOverrides)
+                    }
+                    val ctx = getApplication<Application>()
+                    val uri = androidx.core.content.FileProvider.getUriForFile(
+                        ctx, "${ctx.packageName}.provider", repacked
+                    )
+                    outputIntent.value = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri, "application/octet-stream")
+                        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        setPackage("com.mojang.minecraftpe")
+                    }
+                    _state.value = ExtractState.Success(summary = analysis.packs)
+                } catch (e: Exception) {
+                    _state.value = ExtractState.Error("Failed: ${e.message}")
                 }
-                _state.value = ExtractState.SentToMinecraft(file.name)
-            } catch (e: Exception) {
-                _state.value = ExtractState.Error("Failed: ${e.message}")
             }
         }
+    }
+
+    fun clearPendingIntent() {
+        outputIntent.value = null
     }
 
     fun reset() {
@@ -112,6 +157,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         cachedFile = null
         currentAnalysis = null
         versionOverrides.clear()
+        outputIntent.value = null
         _state.value = ExtractState.Idle
     }
 
