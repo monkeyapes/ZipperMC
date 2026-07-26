@@ -2,18 +2,18 @@ package com.zippermc.viewmodel
 
 import android.app.Application
 import android.net.Uri
-import android.os.Build
-import android.os.Environment
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.zippermc.extractor.MinecraftExtractor
 import com.zippermc.extractor.ZipAnalyzer
 import com.zippermc.model.AnalysisResult
 import com.zippermc.model.ExtractState
 import com.zippermc.util.FileUtils
+import com.zippermc.util.PackRepacker
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -26,21 +26,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var currentAnalysis: AnalysisResult? = null
     private var versionOverrides = mutableMapOf<String, String>()
 
-    fun hasStorageAccess(): Boolean =
-        Build.VERSION.SDK_INT < 30 || Environment.isExternalStorageManager()
-
-    fun checkPermission() {
-        if (!hasStorageAccess()) {
-            _state.value = ExtractState.NeedsPermission
-        }
+    fun onZipPicked(uri: Uri) {
+        processUri(uri)
     }
 
-    fun onZipPicked(uri: Uri) {
-        if (!hasStorageAccess()) {
-            _state.value = ExtractState.NeedsPermission
-            return
-        }
-
+    private fun processUri(uri: Uri) {
         val ctx = getApplication<Application>()
         _state.value = ExtractState.Analyzing(FileUtils.getFileName(ctx, uri))
 
@@ -59,7 +49,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 currentAnalysis = analysis
                 _state.value = ExtractState.Ready(
                     result = analysis,
-                    zipUri = uri.toString(),
                     fileName = file.name,
                 )
             } catch (e: Exception) {
@@ -69,59 +58,51 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startVersionEdit(packIndex: Int) {
-        val analysis = currentAnalysis ?: return
+        val analysis = currentAnalysis ?: run {
+            _state.value = ExtractState.Error("No file loaded")
+            return
+        }
         _state.value = ExtractState.EditingVersion(
             result = analysis,
-            zipUri = "",
             fileName = analysis.fileName,
             packIndex = packIndex,
         )
     }
 
     fun saveVersionOverride(minEngineVer: String, packVer: String) {
+        val analysis = currentAnalysis ?: return
         versionOverrides["min_engine_version"] = minEngineVer
         versionOverrides["pack_version"] = packVer
         _state.value = ExtractState.Ready(
-            result = currentAnalysis ?: return,
-            zipUri = "",
-            fileName = currentAnalysis?.fileName ?: "",
+            result = analysis,
+            fileName = analysis.fileName,
         )
     }
 
     fun cancelVersionEdit() {
+        val analysis = currentAnalysis ?: return
         _state.value = ExtractState.Ready(
-            result = currentAnalysis ?: return,
-            zipUri = "",
-            fileName = currentAnalysis?.fileName ?: "",
+            result = analysis,
+            fileName = analysis.fileName,
         )
     }
 
-    fun startExtract(analysis: AnalysisResult) {
-        val file = cachedFile ?: return
-
-        if (!hasStorageAccess()) {
-            _state.value = ExtractState.NeedsPermission
+    fun sendToMinecraft(analysis: AnalysisResult) {
+        val file = cachedFile ?: run {
+            _state.value = ExtractState.Error("No file loaded")
             return
         }
 
-        _state.value = ExtractState.Extracting(0f, "")
+        _state.value = ExtractState.Repacking(analysis.fileName)
 
         viewModelScope.launch {
             try {
-                val installed = MinecraftExtractor.extract(
-                    zipFile = file,
-                    packs = analysis.packs,
-                    versionOverrides = versionOverrides,
-                    onProgress = { progress, current ->
-                        _state.value = ExtractState.Extracting(progress, current)
-                    },
-                )
-                _state.value = ExtractState.Success(
-                    summary = installed,
-                    totalFiles = installed.size,
-                )
+                withContext(Dispatchers.IO) {
+                    PackRepacker.repack(file, versionOverrides)
+                }
+                _state.value = ExtractState.SentToMinecraft(file.name)
             } catch (e: Exception) {
-                _state.value = ExtractState.Error("Extraction failed: ${e.message}")
+                _state.value = ExtractState.Error("Failed: ${e.message}")
             }
         }
     }
