@@ -8,7 +8,6 @@ import com.zippermc.extractor.MinecraftExtractor
 import com.zippermc.extractor.ZipAnalyzer
 import com.zippermc.model.AnalysisResult
 import com.zippermc.model.ExtractState
-import com.zippermc.model.ZipEntryType
 import com.zippermc.util.FileUtils
 import com.zippermc.util.MinecraftPaths
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,7 +29,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val file = FileUtils.copyToCache(ctx, uri)
                 if (file == null) {
-                    _state.value = ExtractState.Error("Failed to read ZIP file")
+                    _state.value = ExtractState.Error("Failed to read file")
                     return@launch
                 }
                 cachedFile = file
@@ -53,12 +52,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             try {
-                val summary = MinecraftExtractor.extract(file, analysis) { progress, current ->
+                val installed = MinecraftExtractor.extract(file, analysis.packs) { progress, current ->
                     _state.value = ExtractState.Extracting(progress, current)
                 }
-                val total = summary.values.sum()
+                val total = installed.size
                 _state.value = ExtractState.Success(
-                    summary = summary,
+                    summary = installed,
                     totalFiles = total,
                 )
             } catch (e: Exception) {

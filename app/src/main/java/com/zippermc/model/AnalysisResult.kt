@@ -1,8 +1,13 @@
 package com.zippermc.model
 
+data class PackInfo(
+    val type: ZipEntryType,
+    val name: String,
+    val subPath: String,
+)
+
 data class AnalysisResult(
-    val primaryType: ZipEntryType,
-    val secondaryTypes: List<ZipEntryType> = emptyList(),
-    val entryCount: Int = 0,
-    val detectedName: String = "",
+    val packs: List<PackInfo>,
+    val totalEntryCount: Int = 0,
+    val fileName: String = "",
 )

@@ -1,9 +1,9 @@
 package com.zippermc.extractor
 
 import com.zippermc.model.AnalysisResult
+import com.zippermc.model.PackInfo
 import com.zippermc.model.ZipEntryType
 import java.io.File
-import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 
 object ZipAnalyzer {
@@ -13,79 +13,81 @@ object ZipAnalyzer {
         val entries = zip.entries().asSequence().toList()
         val entryNames = entries.map { it.name }
 
-        val rootDirs = entryNames
-            .map { it.substringBefore("/") }
-            .distinct()
-            .filter { it.isNotBlank() }
-
         val rootFiles = entryNames
             .filter { "/" !in it }
             .toSet()
 
-        val detectResult = detectType(zip, entryNames, rootDirs, rootFiles, file.nameWithoutExtension)
+        val subDirs = entryNames
+            .map { it.substringBefore("/") }
+            .distinct()
+            .filter { it.isNotBlank() }
 
-        val secondary = mutableListOf<ZipEntryType>()
+        val packs = mutableListOf<PackInfo>()
 
-        if (detectResult.primaryType != ZipEntryType.RESOURCE_PACK &&
-            hasManifestType(zip, "resources")
-        ) {
-            secondary.add(ZipEntryType.RESOURCE_PACK)
+        if (rootFiles.contains("level.dat") || entryNames.any { it.startsWith("db/") }) {
+            val name = entryNames.firstOrNull { it.endsWith("/levelname.txt") }
+                ?.let { readTextEntry(zip, it) }
+                ?: subDirs.firstOrNull { it != "db" } ?: "World"
+            packs.add(PackInfo(ZipEntryType.WORLD, name, ""))
         }
-        if (detectResult.primaryType != ZipEntryType.BEHAVIOR_PACK &&
-            hasManifestType(zip, "data")
-        ) {
-            secondary.add(ZipEntryType.BEHAVIOR_PACK)
+
+        if (rootFiles.contains("skins.json")) {
+            val name = readManifestName(zip, "") ?: subDirs.firstOrNull() ?: "Skin Pack"
+            packs.add(PackInfo(ZipEntryType.SKIN_PACK, name, ""))
+        }
+
+        val manifestDirs = findManifestDirs(entryNames, rootFiles, subDirs)
+        for ((subPath, manifestPath) in manifestDirs) {
+            val mType = readManifestType(zip, manifestPath)
+            val mName = readManifestName(zip, manifestPath) ?: subPath.ifBlank { file.nameWithoutExtension }
+            if (mType != null) {
+                val type = when (mType) {
+                    "resources" -> ZipEntryType.RESOURCE_PACK
+                    "data" -> ZipEntryType.BEHAVIOR_PACK
+                    else -> ZipEntryType.UNKNOWN
+                }
+                packs.add(PackInfo(type, mName, subPath))
+            }
+        }
+
+        if (packs.isEmpty()) {
+            val type = guessByStructure(entryNames)
+            packs.add(PackInfo(type, file.nameWithoutExtension, ""))
         }
 
         zip.close()
 
-        val name = detectResult.detectedName.ifBlank {
-            rootDirs.firstOrNull() ?: file.nameWithoutExtension
-        }
-
-        return detectResult.copy(
-            secondaryTypes = secondary,
-            entryCount = entries.size,
-            detectedName = name,
+        return AnalysisResult(
+            packs = packs.distinctBy { it.subPath },
+            totalEntryCount = entries.size,
+            fileName = file.name,
         )
     }
 
-    private fun detectType(
-        zip: ZipFile,
+    private fun findManifestDirs(
         entryNames: List<String>,
-        rootDirs: List<String>,
         rootFiles: Set<String>,
-        fileName: String = "Unknown",
-    ): AnalysisResult {
-        if (rootFiles.contains("level.dat") || entryNames.any { it.startsWith("db/") }) {
-            return AnalysisResult(
-                primaryType = ZipEntryType.WORLD,
-                detectedName = entryNames.firstOrNull { it.endsWith("/levelname.txt") }
-                    ?.let { readTextEntry(zip, it) }
-                    ?: rootDirs.firstOrNull { it != "db" } ?: "World",
-            )
+        subDirs: List<String>,
+    ): List<Pair<String, String>> {
+        val results = mutableListOf<Pair<String, String>>()
+
+        if ("manifest.json" in rootFiles) {
+            results.add("" to "manifest.json")
         }
 
-        if (rootFiles.contains("skins.json")) {
-            return AnalysisResult(
-                primaryType = ZipEntryType.SKIN_PACK,
-                detectedName = readManifestName(zip) ?: rootDirs.firstOrNull() ?: "Skin Pack",
-            )
-        }
-
-        val manifestType = readManifestType(zip)
-        if (manifestType != null) {
-            val type = when (manifestType) {
-                "resources" -> ZipEntryType.RESOURCE_PACK
-                "data" -> ZipEntryType.BEHAVIOR_PACK
-                else -> ZipEntryType.UNKNOWN
+        for (dir in subDirs) {
+            val manifestPath = "$dir/manifest.json"
+            if (entryNames.any { it == manifestPath || it.startsWith("$dir/") && it.endsWith("/manifest.json") }) {
+                val actualPath = entryNames.first { it.endsWith("/manifest.json") && it.startsWith("$dir/") }
+                results.add(dir to actualPath)
             }
-            val name = readManifestName(zip) ?: rootDirs.firstOrNull() ?: "Addon"
-            return AnalysisResult(primaryType = type, detectedName = name)
         }
 
-        val score = mutableMapOf<ZipEntryType, Int>()
+        return results
+    }
 
+    private fun guessByStructure(entryNames: List<String>): ZipEntryType {
+        val score = mutableMapOf<ZipEntryType, Int>()
         for (name in entryNames) {
             val lower = name.lowercase()
             when {
@@ -99,46 +101,24 @@ object ZipAnalyzer {
                 }
                 lower.startsWith("entities/") || lower.startsWith("scripts/") ||
                     lower.startsWith("functions/") || lower.startsWith("structures/") ||
-                    name.endsWith(".mcfunction") || name.endsWith(".json") &&
-                    !lower.contains("manifest") -> {
+                    name.endsWith(".mcfunction") -> {
                     score[ZipEntryType.BEHAVIOR_PACK] =
                         score.getOrDefault(ZipEntryType.BEHAVIOR_PACK, 0) + 1
                 }
             }
         }
-
-        val best = score.maxByOrNull { it.value }
-        return if (best != null && best.value > 2) {
-            AnalysisResult(
-                primaryType = best.key,
-                detectedName = rootDirs.firstOrNull() ?: fileName,
-            )
-        } else {
-            AnalysisResult(
-                primaryType = ZipEntryType.UNKNOWN,
-                detectedName = rootDirs.firstOrNull() ?: fileName,
-            )
-        }
+        return score.maxByOrNull { it.value }?.let {
+            if (it.value > 2) it.key else ZipEntryType.UNKNOWN
+        } ?: ZipEntryType.UNKNOWN
     }
 
-    private fun hasManifestType(zip: ZipFile, type: String): Boolean {
-        return readManifestType(zip) == type
-    }
-
-    private fun readManifestType(zip: ZipFile): String? {
-        val entry = zip.getEntry("manifest.json")
-            ?: zip.entries().asSequence().firstOrNull {
-                it.name.endsWith("/manifest.json") && !it.isDirectory
-            } ?: return null
+    private fun readManifestType(zip: ZipFile, manifestPath: String): String? {
+        val entry = zip.getEntry(manifestPath) ?: return null
         return readJsonField(zip, entry, "type")
     }
 
-    private fun readManifestName(zip: ZipFile): String? {
-        val entry = zip.getEntry("manifest.json")
-            ?: zip.entries().asSequence().firstOrNull {
-                it.name.endsWith("/manifest.json") && !it.isDirectory
-            } ?: return null
-
+    private fun readManifestName(zip: ZipFile, manifestPath: String): String? {
+        val entry = zip.getEntry(manifestPath) ?: return null
         val header = readJsonField(zip, entry, "header")
         if (header != null) {
             return try {
@@ -147,10 +127,10 @@ object ZipAnalyzer {
                     .find(header)?.groupValues?.getOrNull(1)
             } catch (_: Exception) { null }
         }
-        return null
+        return readJsonField(zip, entry, "name")
     }
 
-    private fun readJsonField(zip: ZipFile, entry: ZipEntry, field: String): String? {
+    private fun readJsonField(zip: ZipFile, entry: java.util.zip.ZipEntry, field: String): String? {
         return try {
             val text = zip.getInputStream(entry).bufferedReader().use { it.readText() }
             Regex(""""$field"\s*:\s*"([^"]+)""").find(text)?.groupValues?.getOrNull(1)

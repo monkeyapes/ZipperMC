@@ -1,6 +1,6 @@
 package com.zippermc.extractor
 
-import com.zippermc.model.AnalysisResult
+import com.zippermc.model.PackInfo
 import com.zippermc.model.ZipEntryType
 import com.zippermc.util.FileUtils.sanitizeFileName
 import com.zippermc.util.MinecraftPaths
@@ -13,49 +13,53 @@ object MinecraftExtractor {
 
     suspend fun extract(
         zipFile: File,
-        analysis: AnalysisResult,
+        packs: List<PackInfo>,
         onProgress: (Float, String) -> Unit,
-    ): Map<ZipEntryType, Int> = withContext(Dispatchers.IO) {
-        val summary = mutableMapOf<ZipEntryType, Int>()
+    ): List<PackInfo> = withContext(Dispatchers.IO) {
         val zip = ZipFile(zipFile)
-        val entries = zip.entries().asSequence().toList()
-        val total = entries.size
-        var count = 0
+        val allEntries = zip.entries().asSequence().toList()
+        val total = allEntries.size
+        var globalCount = 0
+        val installed = mutableListOf<PackInfo>()
 
-        val primaryTarget = getTargetDir(analysis.primaryType)
-        if (primaryTarget == null) {
-            zip.close()
-            return@withContext summary
-        }
+        for (pack in packs) {
+            val targetDir = getTargetDir(pack.type)
+            if (targetDir == null) continue
 
-        val baseName = sanitizeFileName(analysis.detectedName)
-        val targetDir = File(primaryTarget, baseName).also { it.mkdirs() }
+            val baseName = sanitizeFileName(pack.name)
+            val packTarget = File(targetDir, baseName).also { it.mkdirs() }
+            val prefix = pack.subPath.let { if (it.isBlank()) null else "$it/" }
 
-        for (entry in entries) {
-            if (entry.isDirectory) continue
-            val entryPath = entry.name
-            val outputFile = File(targetDir, entryPath)
+            val relevantEntries = if (prefix != null) {
+                allEntries.filter { it.name.startsWith(prefix) && !it.isDirectory }
+                    .map { it to it.name.removePrefix(prefix) }
+            } else {
+                allEntries.filter { "/" !in it.name || !it.isDirectory }
+                    .map { it to it.name }
+            }
 
-            outputFile.parentFile?.mkdirs()
-            try {
-                zip.getInputStream(entry).use { input ->
-                    outputFile.outputStream().use { output ->
-                        input.copyTo(output)
+            for ((entry, relativePath) in relevantEntries) {
+                val outputFile = File(packTarget, relativePath)
+                outputFile.parentFile?.mkdirs()
+                try {
+                    zip.getInputStream(entry).use { input ->
+                        outputFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
                     }
+                } catch (_: Exception) {}
+
+                globalCount++
+                if (globalCount % 5 == 0 || globalCount == total) {
+                    onProgress(globalCount.toFloat() / total, entry.name)
                 }
-            } catch (_: Exception) {
-                // skip problematic entries
             }
 
-            count++
-            if (count % 5 == 0 || count == total) {
-                onProgress(count.toFloat() / total, entryPath)
-            }
+            installed.add(pack)
         }
 
         zip.close()
-        summary[analysis.primaryType] = entries.count { !it.isDirectory }
-        return@withContext summary
+        return@withContext installed
     }
 
     private fun getTargetDir(type: ZipEntryType): File? {
