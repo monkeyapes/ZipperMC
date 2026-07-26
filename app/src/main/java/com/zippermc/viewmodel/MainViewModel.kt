@@ -28,19 +28,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var cachedFile: java.io.File? = null
     private var currentAnalysis: AnalysisResult? = null
     private var versionOverrides = mutableMapOf<String, String>()
-
-    private val outputIntent = MutableStateFlow<android.content.Intent?>(null)
-    val pendingIntent = outputIntent.asStateFlow()
+    private var mcVersion: String? = null
 
     private val _scannedFiles = MutableStateFlow<List<ScannedFile>>(emptyList())
     val scannedFiles = _scannedFiles.asStateFlow()
 
+    private fun detectMinecraftVersion(): String? {
+        val ctx = getApplication<Application>()
+        return try {
+            val pkg = ctx.packageManager.getPackageInfo("com.mojang.minecraftpe", 0)
+            pkg.versionName
+        } catch (_: Exception) { null }
+    }
+
     fun scanAndAutoInstall() {
+        mcVersion = detectMinecraftVersion()
         val ctx = getApplication<Application>()
         viewModelScope.launch {
-            val files = withContext(Dispatchers.IO) {
-                FileScanner.scan(ctx)
-            }
+            val files = withContext(Dispatchers.IO) { FileScanner.scan(ctx) }
             _scannedFiles.value = files
             if (files.isNotEmpty() && _state.value is ExtractState.Idle) {
                 processUri(files.first().uri, autoInstall = true)
@@ -53,6 +58,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun processUri(uri: Uri, autoInstall: Boolean = false) {
+        if (mcVersion == null) mcVersion = detectMinecraftVersion()
         val ctx = getApplication<Application>()
         _state.value = ExtractState.Analyzing(FileUtils.getFileName(ctx, uri))
 
@@ -69,12 +75,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 val analysis = ZipAnalyzer.analyze(file)
                 currentAnalysis = analysis
+
+                if (mcVersion != null) {
+                    for (pack in analysis.packs) {
+                        if (pack.manifestJson != null) {
+                            val (minEng, _) = parseVersions(pack.manifestJson)
+                            val mcMajor = mcVersion!!.substringBefore(".").toIntOrNull() ?: continue
+                            val mcMinor = mcVersion!!.split(".").getOrNull(1)?.toIntOrNull() ?: continue
+                            val engMajor = minEng.substringBefore(".").toIntOrNull() ?: continue
+                            val engMinor = minEng.split(".").getOrNull(1)?.toIntOrNull() ?: continue
+                            if (engMajor != mcMajor || engMinor != mcMinor) {
+                                versionOverrides["min_engine_version"] = mcVersion!!
+                            }
+                        }
+                    }
+                }
+
                 if (autoInstall && analysis.packs.isNotEmpty()) {
-                    installOrSendToMinecraft(analysis)
+                    tryDirectInstall(analysis)
                 } else {
                     _state.value = ExtractState.Ready(
                         result = analysis,
                         fileName = file.name,
+                        mcVersion = mcVersion,
                     )
                 }
             } catch (e: Exception) {
@@ -83,37 +106,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun startVersionEdit(packIndex: Int) {
-        val analysis = currentAnalysis ?: run {
+    fun retryDirectInstall(analysis: AnalysisResult) {
+        viewModelScope.launch { tryDirectInstall(analysis) }
+    }
+
+    private suspend fun tryDirectInstall(analysis: AnalysisResult) {
+        val file = cachedFile ?: run {
             _state.value = ExtractState.Error("No file loaded")
             return
         }
-        _state.value = ExtractState.EditingVersion(
-            result = analysis,
-            fileName = analysis.fileName,
-            packIndex = packIndex,
-        )
+
+        _state.value = ExtractState.Installing(0f, "")
+
+        try {
+            val installed = MinecraftExtractor.extract(
+                zipFile = file,
+                packs = analysis.packs,
+                versionOverrides = versionOverrides,
+                onProgress = { progress, current ->
+                    _state.value = ExtractState.Installing(progress, current)
+                },
+            )
+            _state.value = ExtractState.Success(summary = installed)
+        } catch (_: Exception) {
+            _state.value = ExtractState.Ready(
+                result = analysis,
+                fileName = file.name,
+                mcVersion = mcVersion,
+            )
+        }
     }
 
-    fun saveVersionOverride(minEngineVer: String, packVer: String) {
-        val analysis = currentAnalysis ?: return
-        versionOverrides["min_engine_version"] = minEngineVer
-        versionOverrides["pack_version"] = packVer
-        _state.value = ExtractState.Ready(
-            result = analysis,
-            fileName = analysis.fileName,
-        )
-    }
-
-    fun cancelVersionEdit() {
-        val analysis = currentAnalysis ?: return
-        _state.value = ExtractState.Ready(
-            result = analysis,
-            fileName = analysis.fileName,
-        )
-    }
-
-    fun installOrSendToMinecraft(analysis: AnalysisResult) {
+    fun sendToMinecraft(@Suppress("UNUSED_PARAMETER") analysis: AnalysisResult) {
         val file = cachedFile ?: run {
             _state.value = ExtractState.Error("No file loaded")
             return
@@ -123,48 +147,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             try {
-                val installed = MinecraftExtractor.extract(
-                    zipFile = file,
-                    packs = analysis.packs,
-                    versionOverrides = versionOverrides,
-                    onProgress = { progress, current ->
-                        _state.value = ExtractState.Installing(progress, current)
-                    },
-                )
-                _state.value = ExtractState.Success(summary = installed)
-            } catch (_: Exception) {
-                // Direct write failed — fallback to sending to Minecraft via intent
-                try {
-                    val repacked = withContext(Dispatchers.IO) {
-                        PackRepacker.repack(file, versionOverrides)
-                    }
-                    val ctx = getApplication<Application>()
-                    val uri = androidx.core.content.FileProvider.getUriForFile(
-                        ctx, "${ctx.packageName}.provider", repacked
-                    )
-                    outputIntent.value = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
-                        setDataAndType(uri, "application/octet-stream")
-                        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        setPackage("com.mojang.minecraftpe")
-                    }
-                    _state.value = ExtractState.Success(summary = analysis.packs)
-                } catch (e: Exception) {
-                    _state.value = ExtractState.Error("Failed: ${e.message}")
+                val repacked = withContext(Dispatchers.IO) {
+                    PackRepacker.repack(file, versionOverrides)
                 }
+                val ctx = getApplication<Application>()
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    ctx, "${ctx.packageName}.provider", repacked
+                )
+                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "application/octet-stream")
+                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    setPackage("com.mojang.minecraftpe")
+                }
+                _state.value = ExtractState.SentToMinecraft(intent)
+            } catch (e: Exception) {
+                _state.value = ExtractState.Error("Failed: ${e.message}")
             }
         }
     }
 
-    fun clearPendingIntent() {
-        outputIntent.value = null
+    fun startVersionEdit(packIndex: Int) {
+        val analysis = currentAnalysis ?: run {
+            _state.value = ExtractState.Error("No file loaded"); return
+        }
+        _state.value = ExtractState.EditingVersion(
+            result = analysis, fileName = analysis.fileName, packIndex = packIndex,
+        )
+    }
+
+    fun saveVersionOverride(minEngineVer: String, packVer: String) {
+        val analysis = currentAnalysis ?: return
+        versionOverrides["min_engine_version"] = minEngineVer
+        versionOverrides["pack_version"] = packVer
+        _state.value = ExtractState.Ready(result = analysis, fileName = analysis.fileName, mcVersion = mcVersion)
+    }
+
+    fun cancelVersionEdit() {
+        val analysis = currentAnalysis ?: return
+        _state.value = ExtractState.Ready(result = analysis, fileName = analysis.fileName, mcVersion = mcVersion)
     }
 
     fun reset() {
-        cachedFile?.delete()
-        cachedFile = null
-        currentAnalysis = null
-        versionOverrides.clear()
-        outputIntent.value = null
+        cachedFile?.delete(); cachedFile = null
+        currentAnalysis = null; versionOverrides.clear()
         _state.value = ExtractState.Idle
     }
 
@@ -176,9 +201,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val mev = header.optJSONArray("min_engine_version")?.let { joinVersion(it) } ?: "1.0.0"
             val pv = header.optJSONArray("version")?.let { joinVersion(it) } ?: "1.0.0"
             mev to pv
-        } catch (_: Exception) {
-            "1.0.0" to "1.0.0"
-        }
+        } catch (_: Exception) { "1.0.0" to "1.0.0" }
     }
 
     private fun joinVersion(arr: JSONArray): String =
