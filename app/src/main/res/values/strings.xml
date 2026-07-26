@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ZipperMC</string>
+    <string name="pick_zip">Pick a ZIP file</string>
+    <string name="installing">Installing…</string>
+    <string name="done">Done!</string>
+    <string name="extracting">Extracting…</string>
+    <string name="error">Something went wrong</string>
+    <string name="no_zip">Select a ZIP file to install</string>
+    <string name="content_detected">Detected: %s</string>
+    <string name="files_installed">%d items installed</string>
+    <string name="open_minecraft">Open Minecraft</string>
+    <string name="install_another">Install another</string>
+    <string name="detecting">Analyzing ZIP…</string>
+    <string name="permission_storage">Storage access is needed to install files into Minecraft</string>
+</resources>
