@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ZipperMC</string>
+    <string name="analyzing">Analiz ediliyor\u2026</string>
+    <string name="ready_to_install">Y\u00fcklemeye Haz\u0131r</string>
+    <string name="install_to_minecraft">Minecraft\'a Y\u00fckle</string>
+    <string name="send_to_minecraft">Minecraft\'a G\u00f6nder</string>
+    <string name="done">Tamamland\u0131!</string>
+    <string name="packs_installed">%d paket y\u00fcklendi</string>
+    <string name="open_minecraft">Minecraft\'\u0131 A\u00e7</string>
+    <string name="install_another">Ba\u015fka y\u00fckle</string>
+    <string name="browse_files">T\u00fcm dosyalara g\u00f6z at</string>
+    <string name="found_files">Bulunan dosyalar</string>
+    <string name="pick_different">Farkl\u0131 dosya se\u00e7</string>
+    <string name="error">Hata</string>
+    <string name="try_again">Tekrar dene</string>
+    <string name="minecraft_not_installed">Minecraft y\u00fckl\u00fc de\u011fil</string>
+    <string name="auto_adjusted">Minecraft %s i\u00e7in otomatik ayarland\u0131</string>
+    <string name="edit_version">S\u00fcr\u00fcm\u00fc D\u00fczenle</string>
+    <string name="save_continue">Kaydet &amp; Devam Et</string>
+    <string name="cancel">\u0130ptal</string>
+    <string name="preparing">Haz\u0131rlan\u0131yor\u2026</string>
+    <string name="resource_pack">Kaynak Paketi</string>
+    <string name="behavior_pack">Davran\u0131\u015f Paketi</string>
+    <string name="world">D\u00fcnya</string>
+    <string name="skin_pack">Skin Paketi</string>
+    <string name="no_content">\u0130\u00e7erik bulunamad\u0131</string>
+    <string name="installing">Y\u00fckleniyor\u2026</string>
+    <string name="sent_to_minecraft">Minecraft\'a G\u00f6nderildi!</string>
+</resources>

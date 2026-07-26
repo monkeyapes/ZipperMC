@@ -1,16 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">ZipperMC</string>
-    <string name="pick_zip">Pick a ZIP file</string>
-    <string name="installing">Installing…</string>
+    <string name="analyzing">Analyzing\u2026</string>
+    <string name="ready_to_install">Ready to Install</string>
+    <string name="install_to_minecraft">Install to Minecraft</string>
+    <string name="send_to_minecraft">Send to Minecraft</string>
     <string name="done">Done!</string>
-    <string name="extracting">Extracting…</string>
-    <string name="error">Something went wrong</string>
-    <string name="no_zip">Select a ZIP file to install</string>
-    <string name="content_detected">Detected: %s</string>
-    <string name="files_installed">%d items installed</string>
+    <string name="packs_installed">%d pack(s) installed</string>
     <string name="open_minecraft">Open Minecraft</string>
     <string name="install_another">Install another</string>
-    <string name="detecting">Analyzing ZIP…</string>
-    <string name="permission_storage">Storage access is needed to install files into Minecraft</string>
+    <string name="browse_files">Browse all files</string>
+    <string name="found_files">Found files</string>
+    <string name="pick_different">Pick different file</string>
+    <string name="error">Error</string>
+    <string name="try_again">Try again</string>
+    <string name="minecraft_not_installed">Minecraft not installed</string>
+    <string name="auto_adjusted">Auto-adjusted for Minecraft %s</string>
+    <string name="edit_version">Edit Version</string>
+    <string name="save_continue">Save &amp; Continue</string>
+    <string name="cancel">Cancel</string>
+    <string name="preparing">Preparing\u2026</string>
+    <string name="resource_pack">Resource Pack</string>
+    <string name="behavior_pack">Behavior Pack</string>
+    <string name="world">World</string>
+    <string name="skin_pack">Skin Pack</string>
+    <string name="no_content">No content detected</string>
+    <string name="installing">Installing\u2026</string>
+    <string name="sent_to_minecraft">Sent to Minecraft!</string>
 </resources>
