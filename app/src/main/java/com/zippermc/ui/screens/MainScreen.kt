@@ -260,7 +260,7 @@ private fun ExtractingContent(progress: Float, currentFile: String) {
         Text("Installing…", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(16.dp))
         LinearProgressIndicator(
-            progress = { progress },
+            progress = progress,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(8.dp)

@@ -22,7 +22,7 @@ object ZipAnalyzer {
             .filter { "/" !in it }
             .toSet()
 
-        val detectResult = detectType(zip, entryNames, rootDirs, rootFiles)
+        val detectResult = detectType(zip, entryNames, rootDirs, rootFiles, file.nameWithoutExtension)
 
         val secondary = mutableListOf<ZipEntryType>()
 
@@ -55,6 +55,7 @@ object ZipAnalyzer {
         entryNames: List<String>,
         rootDirs: List<String>,
         rootFiles: Set<String>,
+        fileName: String = "Unknown",
     ): AnalysisResult {
         if (rootFiles.contains("level.dat") || entryNames.any { it.startsWith("db/") }) {
             return AnalysisResult(
@@ -110,12 +111,12 @@ object ZipAnalyzer {
         return if (best != null && best.value > 2) {
             AnalysisResult(
                 primaryType = best.key,
-                detectedName = rootDirs.firstOrNull() ?: file.nameWithoutExtension,
+                detectedName = rootDirs.firstOrNull() ?: fileName,
             )
         } else {
             AnalysisResult(
                 primaryType = ZipEntryType.UNKNOWN,
-                detectedName = rootDirs.firstOrNull() ?: file.nameWithoutExtension,
+                detectedName = rootDirs.firstOrNull() ?: fileName,
             )
         }
     }
