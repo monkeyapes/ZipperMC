@@ -4,6 +4,22 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <queries>
+        <package android:name="com.mojang.minecraftpe" />
+        <package android:name="com.mojang.minecraftedu" />
+        <package android:name="com.mojang.minecraftpreview" />
+        <package android:name="com.mojang.minecrafttv" />
+        <package android:name="net.kdt.pojavlaunch" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="application/octet-stream" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="application/zip" />
+        </intent>
+    </queries>
+
     <application
         android:name=".ZipperMCApp"
         android:allowBackup="true"
@@ -33,7 +49,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- file:// scheme: match by extension -->
+            <!-- file scheme: match by extension pathPattern -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -71,7 +87,13 @@
                 <data android:pathPattern=".*\\.zip" />
             </intent-filter>
 
-            <!-- content:// scheme from downloads/file managers: match by MIME type -->
+            <!-- content scheme: match by MIME type (most file managers use content://) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -83,12 +105,6 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="content" />
                 <data android:mimeType="application/x-zip-compressed" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:scheme="content" />
-                <data android:mimeType="application/octet-stream" />
             </intent-filter>
         </activity>
     </application>

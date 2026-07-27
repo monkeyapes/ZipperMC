@@ -7,6 +7,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.ViewModelProvider
 import com.zippermc.ui.screens.MainScreen
@@ -22,9 +24,10 @@ class MainActivity : ComponentActivity() {
         viewModel = ViewModelProvider(this)[MainViewModel::class.java]
         enableEdgeToEdge()
         setContent {
-            ZipperMCTheme {
+            val darkTheme by viewModel.darkTheme.collectAsState()
+            ZipperMCTheme(darkTheme = darkTheme) {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    MainScreen(viewModel)
+                    MainScreen(viewModel, onToggleTheme = { recreate() })
                 }
             }
         }

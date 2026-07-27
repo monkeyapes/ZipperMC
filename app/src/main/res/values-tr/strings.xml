@@ -27,4 +27,5 @@
     <string name="no_content">\u0130\u00e7erik bulunamad\u0131</string>
     <string name="installing">Y\u00fckleniyor\u2026</string>
     <string name="sent_to_minecraft">Minecraft\'a G\u00f6nderildi!</string>
+    <string name="mc_addon_installer">Minecraft Eklenti Y\u00fckleyici</string>
 </resources>

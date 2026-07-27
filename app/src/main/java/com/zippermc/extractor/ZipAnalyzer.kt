@@ -9,60 +9,59 @@ import java.util.zip.ZipFile
 object ZipAnalyzer {
 
     fun analyze(file: File): AnalysisResult {
-        val zip = ZipFile(file)
-        val entries = zip.entries().asSequence().toList()
-        val entryNames = entries.map { it.name }
+        return ZipFile(file).use { zip ->
+            val entries = zip.entries().asSequence().toList()
+            val entryNames = entries.map { it.name }
 
-        val rootFiles = entryNames
-            .filter { "/" !in it }
-            .toSet()
+            val rootFiles = entryNames
+                .filter { "/" !in it }
+                .toSet()
 
-        val subDirs = entryNames
-            .map { it.substringBefore("/") }
-            .distinct()
-            .filter { it.isNotBlank() }
+            val subDirs = entryNames
+                .map { it.substringBefore("/") }
+                .distinct()
+                .filter { it.isNotBlank() }
 
-        val packs = mutableListOf<PackInfo>()
+            val packs = mutableListOf<PackInfo>()
 
-        if (rootFiles.contains("level.dat") || entryNames.any { it.startsWith("db/") }) {
-            val name = entryNames.firstOrNull { it.endsWith("/levelname.txt") }
-                ?.let { readTextEntry(zip, it) }
-                ?: subDirs.firstOrNull { it != "db" } ?: "World"
-            packs.add(PackInfo(ZipEntryType.WORLD, name, ""))
-        }
-
-        if (rootFiles.contains("skins.json")) {
-            val name = readManifestName(zip, "") ?: subDirs.firstOrNull() ?: "Skin Pack"
-            packs.add(PackInfo(ZipEntryType.SKIN_PACK, name, ""))
-        }
-
-        val manifestDirs = findManifestDirs(entryNames, rootFiles, subDirs)
-        for ((subPath, manifestPath) in manifestDirs) {
-            val mType = readManifestType(zip, manifestPath)
-            val jsonText = readEntryText(zip, manifestPath)
-            val mName = readManifestName(zip, manifestPath) ?: subPath.ifBlank { file.nameWithoutExtension }
-            if (mType != null) {
-                val type = when (mType) {
-                    "resources" -> ZipEntryType.RESOURCE_PACK
-                    "data" -> ZipEntryType.BEHAVIOR_PACK
-                    else -> ZipEntryType.UNKNOWN
-                }
-                packs.add(PackInfo(type, mName, subPath, jsonText))
+            if (rootFiles.contains("level.dat") || entryNames.any { it.startsWith("db/") }) {
+                val name = entryNames.firstOrNull { it.endsWith("/levelname.txt") }
+                    ?.let { readTextEntry(zip, it) }
+                    ?: subDirs.firstOrNull { it != "db" } ?: "World"
+                packs.add(PackInfo(ZipEntryType.WORLD, name, ""))
             }
+
+            if (rootFiles.contains("skins.json")) {
+                val name = readManifestName(zip, "") ?: subDirs.firstOrNull() ?: "Skin Pack"
+                packs.add(PackInfo(ZipEntryType.SKIN_PACK, name, ""))
+            }
+
+            val manifestDirs = findManifestDirs(entryNames, rootFiles, subDirs)
+            for ((subPath, manifestPath) in manifestDirs) {
+                val mType = readManifestType(zip, manifestPath)
+                val jsonText = readEntryText(zip, manifestPath)
+                val mName = readManifestName(zip, manifestPath) ?: subPath.ifBlank { file.nameWithoutExtension }
+                if (mType != null) {
+                    val type = when (mType) {
+                        "resources" -> ZipEntryType.RESOURCE_PACK
+                        "data" -> ZipEntryType.BEHAVIOR_PACK
+                        else -> ZipEntryType.UNKNOWN
+                    }
+                    packs.add(PackInfo(type, mName, subPath, jsonText))
+                }
+            }
+
+            if (packs.isEmpty()) {
+                val type = guessByStructure(entryNames)
+                packs.add(PackInfo(type, file.nameWithoutExtension, ""))
+            }
+
+            AnalysisResult(
+                packs = packs.distinctBy { it.subPath },
+                totalEntryCount = entries.size,
+                fileName = file.name,
+            )
         }
-
-        if (packs.isEmpty()) {
-            val type = guessByStructure(entryNames)
-            packs.add(PackInfo(type, file.nameWithoutExtension, ""))
-        }
-
-        zip.close()
-
-        return AnalysisResult(
-            packs = packs.distinctBy { it.subPath },
-            totalEntryCount = entries.size,
-            fileName = file.name,
-        )
     }
 
     private fun findManifestDirs(
