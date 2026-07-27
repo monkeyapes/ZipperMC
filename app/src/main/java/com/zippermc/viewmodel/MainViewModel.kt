@@ -24,6 +24,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -60,6 +62,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _updateAvailable = MutableStateFlow<UpdateInfo?>(null)
     val updateAvailable = _updateAvailable.asStateFlow()
+
+    private val processLock = Mutex()
 
     init {
         loadHistory()
@@ -195,9 +199,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             "com.mojang.minecraftedu",
             "com.mojang.minecraftpreview",
             "com.mojang.minecrafttv",
+            "com.mojang.minecrafttrial",
             "net.kdt.pojavlaunch",
+            "net.kdt.pojavlaunch.debug",
             "com.mcpelauncher",
             "com.mcpelauncher.app",
+            "io.mrarm.mcpelauncher",
+            "io.mrarm.mctoolbox",
         )
         for (pkg in knownPackages) {
             try {
@@ -208,31 +216,54 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (_: PackageManager.NameNotFoundException) {}
         }
 
-        val intentTypes = listOf("application/octet-stream", "application/zip")
+        val intentTypes = listOf("application/octet-stream", "application/zip", "application/x-zip-compressed")
         for (mime in intentTypes) {
             try {
                 val intents = pm.queryIntentActivities(Intent(Intent.ACTION_VIEW).setType(mime), 0)
                 for (ri in intents) {
                     val pkg = ri.activityInfo.packageName
-                    val lower = pkg.lowercase()
-                    if (pkg !in seen && (lower.contains("minecraft") || lower.contains("mcpe") ||
-                            lower.contains("pojav") || lower.contains("craft") && lower.contains("mc"))
-                    ) {
-                        try {
-                            val info = pm.getPackageInfo(pkg, 0)
-                            val label = info.applicationInfo?.let { pm.getApplicationLabel(it).toString() } ?: pkg
+                    if (pkg in seen) continue
+                    seen.add(pkg)
+                    try {
+                        val info = pm.getPackageInfo(pkg, 0)
+                        val label = info.applicationInfo?.let { pm.getApplicationLabel(it).toString() } ?: pkg
+                        val lowerPkg = pkg.lowercase()
+                        val lowerLabel = label.lowercase()
+                        if (lowerPkg.contains("minecraft") || lowerPkg.contains("mcpe") ||
+                            lowerPkg.contains("pojav") || lowerPkg.contains("mcpelauncher") ||
+                            lowerLabel.contains("minecraft") || lowerLabel.contains("pojav") ||
+                            lowerLabel.contains("mcpe")
+                        ) {
                             results.add(MinecraftInstall(pkg, info.versionName ?: "?", label))
-                            seen.add(pkg)
-                        } catch (_: Exception) {}
-                    }
+                        }
+                    } catch (_: Exception) {}
                 }
             } catch (_: Exception) {}
         }
 
+        try {
+            val launcherIntents = pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_LAUNCHER) }, 0)
+            for (ri in launcherIntents) {
+                val pkg = ri.activityInfo.packageName
+                if (pkg in seen) continue
+                seen.add(pkg)
+                try {
+                    val info = pm.getPackageInfo(pkg, 0)
+                    val lowerPkg = pkg.lowercase()
+                    val label = info.applicationInfo?.let { pm.getApplicationLabel(it).toString() } ?: pkg
+                    val lowerLabel = label.lowercase()
+                    if (lowerPkg.contains("minecraft") || lowerPkg.contains("pojav") || lowerLabel.contains("minecraft")) {
+                        results.add(MinecraftInstall(pkg, info.versionName ?: "?", label))
+                    }
+                } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {}
+
         results.sortByDescending {
             when (it.packageName) {
-                "com.mojang.minecraftpe" -> 3
-                "com.mojang.minecraftpreview" -> 2
+                "com.mojang.minecraftpe" -> 4
+                "com.mojang.minecraftpreview" -> 3
+                "net.kdt.pojavlaunch" -> 2
                 else -> if (it.packageName.contains("minecraft")) 1 else 0
             }
         }
@@ -253,8 +284,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         detectInstallations()
         val ctx = getApplication<Application>()
         viewModelScope.launch {
-            val files = withContext(Dispatchers.IO) { FileScanner.scan(ctx) }
-            _scannedFiles.value = files
+            try {
+                val files = withContext(Dispatchers.IO) { FileScanner.scan(ctx) }
+                _scannedFiles.value = files
+            } catch (_: Exception) {}
         }
     }
 
@@ -263,11 +296,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         detectInstallations()
         val ctx = getApplication<Application>()
         viewModelScope.launch {
-            val files = withContext(Dispatchers.IO) { FileScanner.scan(ctx) }
-            _scannedFiles.value = files
-            if (files.isNotEmpty() && _state.value is ExtractState.Idle) {
-                processUri(files.first().uri)
-            }
+            try {
+                val files = withContext(Dispatchers.IO) { FileScanner.scan(ctx) }
+                _scannedFiles.value = files
+                if (files.isNotEmpty() && _state.value is ExtractState.Idle) {
+                    processUri(files.first().uri)
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -276,54 +311,56 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun processUri(uri: Uri) {
-        val ctx = getApplication<Application>()
-        if (selectedInstall == null) detectInstallations()
-        _state.value = ExtractState.Analyzing("")
-
         viewModelScope.launch {
-            try {
-                val fileName = withContext(Dispatchers.IO) { FileUtils.getFileName(ctx, uri) }
-                _state.value = ExtractState.Analyzing(fileName)
-                val file = withContext(Dispatchers.IO) { FileUtils.copyToCache(ctx, uri) }
-                if (file == null) {
-                    _state.value = ExtractState.Error("Failed to read file")
-                    return@launch
-                }
-                cachedFile?.delete()
-                cachedFile = file
-                currentAnalysis = null
-                versionOverrides.clear()
+            processLock.withLock {
+                val ctx = getApplication<Application>()
+                if (selectedInstall == null) detectInstallations()
+                _state.value = ExtractState.Analyzing("")
 
-                val analysis = withContext(Dispatchers.IO) { ZipAnalyzer.analyze(file) }
-                currentAnalysis = analysis
+                try {
+                    val fileName = withContext(Dispatchers.IO) { FileUtils.getFileName(ctx, uri) }
+                    _state.value = ExtractState.Analyzing(fileName)
+                    val file = withContext(Dispatchers.IO) { FileUtils.copyToCache(ctx, uri) }
+                    if (file == null) {
+                        _state.value = ExtractState.Error("Failed to read file")
+                        return@withLock
+                    }
+                    cachedFile?.delete()
+                    cachedFile = file
+                    currentAnalysis = null
+                    versionOverrides.clear()
 
-                selectedInstall?.let { mc ->
-                    val mcParts = mc.versionName.split(".").mapNotNull { it.toIntOrNull() }
-                    if (mcParts.size >= 2) {
-                        val mcPrefix = "${mcParts[0]}.${mcParts[1]}"
-                        for (pack in analysis.packs) {
-                            if (pack.manifestJson != null) {
-                                val (minEng, _) = parseVersions(pack.manifestJson)
-                                val engParts = minEng.split(".").mapNotNull { it.toIntOrNull() }
-                                if (engParts.size >= 2) {
-                                    val engPrefix = "${engParts[0]}.${engParts[1]}"
-                                    if (engPrefix != mcPrefix) {
-                                        versionOverrides["min_engine_version"] = mc.versionName
+                    val analysis = withContext(Dispatchers.IO) { ZipAnalyzer.analyze(file) }
+                    currentAnalysis = analysis
+
+                    selectedInstall?.let { mc ->
+                        val mcParts = mc.versionName.split(".").mapNotNull { it.toIntOrNull() }
+                        if (mcParts.size >= 2) {
+                            val mcPrefix = "${mcParts[0]}.${mcParts[1]}"
+                            for (pack in analysis.packs) {
+                                if (pack.manifestJson != null) {
+                                    val (minEng, _) = parseVersions(pack.manifestJson)
+                                    val engParts = minEng.split(".").mapNotNull { it.toIntOrNull() }
+                                    if (engParts.size >= 2) {
+                                        val engPrefix = "${engParts[0]}.${engParts[1]}"
+                                        if (engPrefix != mcPrefix) {
+                                            versionOverrides["min_engine_version"] = mc.versionName
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
 
-                _state.value = ExtractState.Ready(
-                    result = analysis,
-                    fileName = file.name,
-                    mcVersion = selectedInstall?.versionName,
-                )
-            } catch (e: java.lang.Exception) {
-                val msg = e.message ?: e::class.simpleName ?: "Unknown error"
-                _state.value = ExtractState.Error(msg)
+                    _state.value = ExtractState.Ready(
+                        result = analysis,
+                        fileName = file.name,
+                        mcVersion = selectedInstall?.versionName,
+                    )
+                } catch (e: java.lang.Exception) {
+                    val msg = e.message ?: e::class.simpleName ?: "Unknown error"
+                    _state.value = ExtractState.Error(msg)
+                }
             }
         }
     }

@@ -9,7 +9,13 @@
         <package android:name="com.mojang.minecraftedu" />
         <package android:name="com.mojang.minecraftpreview" />
         <package android:name="com.mojang.minecrafttv" />
+        <package android:name="com.mojang.minecrafttrial" />
         <package android:name="net.kdt.pojavlaunch" />
+        <package android:name="net.kdt.pojavlaunch.debug" />
+        <package android:name="com.mcpelauncher" />
+        <package android:name="com.mcpelauncher.app" />
+        <package android:name="io.mrarm.mcpelauncher" />
+        <package android:name="io.mrarm.mctoolbox" />
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:mimeType="application/octet-stream" />
@@ -17,6 +23,14 @@
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:mimeType="application/zip" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="application/x-zip-compressed" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
         </intent>
     </queries>
 
