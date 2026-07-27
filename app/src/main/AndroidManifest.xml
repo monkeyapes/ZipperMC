@@ -10,6 +10,12 @@
         <package android:name="com.mojang.minecraftpreview" />
         <package android:name="com.mojang.minecrafttv" />
         <package android:name="com.mojang.minecrafttrial" />
+        <package android:name="com.mojang.minecrafttrialpe" />
+        <package android:name="com.mojang.minecraftpe.demo" />
+        <package android:name="com.mojang.minecraftearth" />
+        <package android:name="com.mojang.minecraftonline" />
+        <package android:name="com.mojang.minecraftedu_preview" />
+        <package android:name="com.mojang.scrolls" />
         <package android:name="net.kdt.pojavlaunch" />
         <package android:name="net.kdt.pojavlaunch.debug" />
         <package android:name="com.mcpelauncher" />
