@@ -40,8 +40,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
-        if (intent?.action == Intent.ACTION_VIEW && intent.data != null) {
-            viewModel.onZipPicked(intent.data!!)
-        }
+        try {
+            val data = intent?.data
+            if (intent?.action == Intent.ACTION_VIEW && data != null) {
+                viewModel.onZipPicked(data)
+            }
+        } catch (_: Exception) {}
     }
+
+    fun getViewModel(): MainViewModel = viewModel
 }

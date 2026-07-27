@@ -343,55 +343,59 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun processUri(uri: Uri) {
         viewModelScope.launch {
-            processLock.withLock {
-                val ctx = getApplication<Application>()
-                if (selectedInstall == null) detectInstallations()
-                _state.value = ExtractState.Analyzing("")
+            try {
+                processLock.withLock {
+                    try {
+                        val ctx = getApplication<Application>()
+                        if (selectedInstall == null) detectInstallations()
+                        _state.value = ExtractState.Analyzing("")
 
-                try {
-                    val fileName = withContext(Dispatchers.IO) { FileUtils.getFileName(ctx, uri) }
-                    _state.value = ExtractState.Analyzing(fileName)
-                    val file = withContext(Dispatchers.IO) { FileUtils.copyToCache(ctx, uri) }
-                    if (file == null) {
-                        _state.value = ExtractState.Error("Failed to read file")
-                        return@withLock
-                    }
-                    cachedFile?.delete()
-                    cachedFile = file
-                    currentAnalysis = null
-                    versionOverrides.clear()
+                        val fileName = withContext(Dispatchers.IO) { FileUtils.getFileName(ctx, uri) }
+                        _state.value = ExtractState.Analyzing(fileName)
+                        val file = withContext(Dispatchers.IO) { FileUtils.copyToCache(ctx, uri) }
+                        if (file == null) {
+                            _state.value = ExtractState.Error("Failed to read file")
+                            return@withLock
+                        }
+                        cachedFile?.delete()
+                        cachedFile = file
+                        currentAnalysis = null
+                        versionOverrides.clear()
 
-                    val analysis = withContext(Dispatchers.IO) { ZipAnalyzer.analyze(file) }
-                    currentAnalysis = analysis
+                        val analysis = withContext(Dispatchers.IO) { ZipAnalyzer.analyze(file) }
+                        currentAnalysis = analysis
 
-                    selectedInstall?.let { mc ->
-                        val mcParts = mc.versionName.split(".").mapNotNull { it.toIntOrNull() }
-                        if (mcParts.size >= 2) {
-                            val mcPrefix = "${mcParts[0]}.${mcParts[1]}"
-                            for (pack in analysis.packs) {
-                                if (pack.manifestJson != null) {
-                                    val (minEng, _) = parseVersions(pack.manifestJson)
-                                    val engParts = minEng.split(".").mapNotNull { it.toIntOrNull() }
-                                    if (engParts.size >= 2) {
-                                        val engPrefix = "${engParts[0]}.${engParts[1]}"
-                                        if (engPrefix != mcPrefix) {
-                                            versionOverrides["min_engine_version"] = mc.versionName
+                        selectedInstall?.let { mc ->
+                            val mcParts = mc.versionName.split(".").mapNotNull { it.toIntOrNull() }
+                            if (mcParts.size >= 2) {
+                                val mcPrefix = "${mcParts[0]}.${mcParts[1]}"
+                                for (pack in analysis.packs) {
+                                    if (pack.manifestJson != null) {
+                                        val (minEng, _) = parseVersions(pack.manifestJson)
+                                        val engParts = minEng.split(".").mapNotNull { it.toIntOrNull() }
+                                        if (engParts.size >= 2) {
+                                            val engPrefix = "${engParts[0]}.${engParts[1]}"
+                                            if (engPrefix != mcPrefix) {
+                                                versionOverrides["min_engine_version"] = mc.versionName
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
-                    }
 
-                    _state.value = ExtractState.Ready(
-                        result = analysis,
-                        fileName = file.name,
-                        mcVersion = selectedInstall?.versionName,
-                    )
-                } catch (e: java.lang.Exception) {
-                    val msg = e.message ?: e::class.simpleName ?: "Unknown error"
-                    _state.value = ExtractState.Error(msg)
+                        _state.value = ExtractState.Ready(
+                            result = analysis,
+                            fileName = file.name,
+                            mcVersion = selectedInstall?.versionName,
+                        )
+                    } catch (e: java.lang.Exception) {
+                        val msg = e.message ?: e::class.simpleName ?: "Unknown error"
+                        _state.value = ExtractState.Error(msg)
+                    }
                 }
+            } catch (e: java.lang.Exception) {
+                _state.value = ExtractState.Error("Unexpected error: ${e.message}")
             }
         }
     }
@@ -417,7 +421,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 addToHistory(fileName, analysis.packs)
                 _state.value = ExtractState.SentToMinecraft(intent)
-            } catch (e: Exception) {
+            } catch (e: java.lang.Exception) {
                 _state.value = ExtractState.Error("Failed: ${e.message}")
             }
         }
