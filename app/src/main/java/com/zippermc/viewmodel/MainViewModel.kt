@@ -63,6 +63,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _updateAvailable = MutableStateFlow<UpdateInfo?>(null)
     val updateAvailable = _updateAvailable.asStateFlow()
 
+    private val _snackbarMessage = MutableStateFlow<String?>(null)
+    val snackbarMessage = _snackbarMessage.asStateFlow()
+
     private val processLock = Mutex()
 
     init {
@@ -186,6 +189,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun clearHistory() {
         _history.value = emptyList()
         prefs.edit().remove("history").apply()
+    }
+
+    fun deleteHistoryItem(timestamp: Long) {
+        val current = _history.value.toMutableList()
+        current.removeAll { it.timestamp == timestamp }
+        _history.value = current
+        saveHistory()
+    }
+
+    fun restoreHistoryItem(entry: PackHistory) {
+        val current = _history.value.toMutableList()
+        current.add(0, entry)
+        _history.value = current
+        saveHistory()
+    }
+
+    fun showSnackbar(msg: String) {
+        _snackbarMessage.value = msg
+    }
+
+    fun clearSnackbar() {
+        _snackbarMessage.value = null
     }
 
     fun detectInstallations(): List<MinecraftInstall> {

@@ -11,8 +11,8 @@ android {
         applicationId = "com.zippermc"
         minSdk = 26
         targetSdk = 35
-        versionCode = 14
-        versionName = "1.5.5"
+        versionCode = 15
+        versionName = "1.6.0-beta"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
@@ -67,6 +67,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.animation:animation")
 
