@@ -348,10 +348,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     try {
                         val ctx = getApplication<Application>()
                         if (selectedInstall == null) detectInstallations()
-                        _state.value = ExtractState.Analyzing("")
+                        _state.value = ExtractState.Analyzing("Preparing...")
 
                         val fileName = withContext(Dispatchers.IO) { FileUtils.getFileName(ctx, uri) }
-                        _state.value = ExtractState.Analyzing(fileName)
                         val file = withContext(Dispatchers.IO) { FileUtils.copyToCache(ctx, uri) }
                         if (file == null) {
                             _state.value = ExtractState.Error("Failed to read file")

@@ -6,10 +6,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -272,31 +269,34 @@ private fun HomeTab(viewModel: MainViewModel, snackbarHostState: SnackbarHostSta
         }
         is ExtractState.SentToMinecraft -> SentToMinecraftContent(s.intent)
         else -> {
-            Box(modifier = Modifier.fillMaxSize()) {
-                AnimatedContent(targetState = state, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "state") { currentState ->
-                    when (currentState) {
-                        is ExtractState.Idle -> IdleContent(
-                            scannedFiles, mcInstalls, selectedMc,
-                            onPickZip = { filePicker.launch(arrayOf("*/*")) },
-                            onPickScanned = { viewModel.onZipPicked(it) },
-                            onSelectMc = { showMcSheet = true },
-                            onChangeMc = { showMcSheet = true },
-                        )
-                        is ExtractState.Analyzing -> AnalyzingContent(currentState.fileName)
-                        is ExtractState.Ready -> ReadyContent(
-                            result = currentState.result,
-                            mcVersion = currentState.mcVersion,
-                            selectedMc = selectedMc,
-                            hasOverrides = viewModel.parseVersions(currentState.result.packs.firstOrNull()?.manifestJson).first != (currentState.mcVersion ?: ""),
-                            onSendToMinecraft = { viewModel.sendToMinecraft(currentState.result) },
-                            onEditVersion = { viewModel.startVersionEdit(it) },
-                            onPickAnother = { filePicker.launch(arrayOf("*/*")) },
-                            onChangeMc = { showMcSheet = true },
-                        )
-                        is ExtractState.Installing -> InstallingContent(currentState.progress, currentState.currentFile)
-                        else -> {}
-                    }
-                }
+            val cur = state
+            when (cur) {
+                is ExtractState.Idle -> IdleContent(
+                    scannedFiles, mcInstalls, selectedMc,
+                    onPickZip = { filePicker.launch(arrayOf("*/*")) },
+                    onPickScanned = { viewModel.onZipPicked(it) },
+                    onSelectMc = { showMcSheet = true },
+                    onChangeMc = { showMcSheet = true },
+                )
+                is ExtractState.Analyzing -> AnalyzingContent(cur.fileName)
+                is ExtractState.Ready -> ReadyContent(
+                    result = cur.result,
+                    mcVersion = cur.mcVersion,
+                    selectedMc = selectedMc,
+                    hasOverrides = viewModel.parseVersions(cur.result.packs.firstOrNull()?.manifestJson).first != (cur.mcVersion ?: ""),
+                    onSendToMinecraft = { viewModel.sendToMinecraft(cur.result) },
+                    onEditVersion = { viewModel.startVersionEdit(it) },
+                    onPickAnother = { filePicker.launch(arrayOf("*/*")) },
+                    onChangeMc = { showMcSheet = true },
+                )
+                is ExtractState.Installing -> InstallingContent(cur.progress, cur.currentFile)
+                else -> IdleContent(
+                    scannedFiles, mcInstalls, selectedMc,
+                    onPickZip = { filePicker.launch(arrayOf("*/*")) },
+                    onPickScanned = { viewModel.onZipPicked(it) },
+                    onSelectMc = { showMcSheet = true },
+                    onChangeMc = { showMcSheet = true },
+                )
             }
         }
     }
