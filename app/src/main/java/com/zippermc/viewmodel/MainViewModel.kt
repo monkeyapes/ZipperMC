@@ -391,10 +391,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     } catch (e: java.lang.Exception) {
                         val msg = e.message ?: e::class.simpleName ?: "Unknown error"
                         _state.value = ExtractState.Error(msg)
+                        saveErrorLog(e, msg)
                     }
                 }
             } catch (e: java.lang.Exception) {
-                _state.value = ExtractState.Error("Unexpected error: ${e.message}")
+                val msg = "Unexpected: ${e.message}"
+                _state.value = ExtractState.Error(msg)
+                saveErrorLog(e, msg)
             }
         }
     }
@@ -447,6 +450,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         cachedFile?.delete(); cachedFile = null
         currentAnalysis = null; versionOverrides.clear()
         _state.value = ExtractState.Idle
+    }
+
+    private fun saveErrorLog(e: java.lang.Exception, msg: String) {
+        try {
+            val ctx = getApplication<Application>()
+            val dir = ctx.filesDir
+            dir.mkdirs()
+            val prefs = ctx.getSharedPreferences("zippermc_crash", 0)
+            val count = prefs.getInt("crash_count", 0) + 1
+            prefs.edit().putInt("crash_count", count).putString("last_crash", "$msg").apply()
+            val file = java.io.File(dir, "crash_$count.log")
+            java.io.FileWriter(file).use { it.write("Error: $msg\n${e.stackTraceToString()}") }
+        } catch (_: Exception) {}
     }
 
     fun parseVersions(manifestJson: String?): Pair<String, String> {
