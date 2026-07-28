@@ -51,7 +51,7 @@ fun SettingsScreen(viewModel: MainViewModel, onToggleTheme: () -> Unit) {
     val context = LocalContext.current
     var crashCount by remember { mutableStateOf(0) }
 
-    val crashDir = context.getExternalFilesDir(null) ?: context.filesDir
+    val crashDir = context.filesDir
     val crashFiles = crashDir.listFiles()?.filter { it.name.startsWith("crash_") && it.name.endsWith(".log") } ?: emptyList()
     if (crashFiles.size != crashCount) crashCount = crashFiles.size
 

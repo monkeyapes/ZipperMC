@@ -10,7 +10,7 @@ class ZipperMCApp : Application() {
         val prev = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, e ->
             try {
-                val dir = getExternalFilesDir(null) ?: filesDir
+                val dir = filesDir
                 dir.mkdirs()
                 val existing = dir.listFiles()?.filter { it.name.startsWith("crash_") && it.name.endsWith(".log") }?.maxOfOrNull { it.name } ?: "crash_0"
                 val idx = existing.substringAfter("crash_").substringBefore(".log").toIntOrNull() ?: 0
