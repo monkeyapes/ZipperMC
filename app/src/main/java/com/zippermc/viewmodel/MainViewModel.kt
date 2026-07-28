@@ -388,13 +388,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             fileName = file.name,
                             mcVersion = selectedInstall?.versionName,
                         )
-                    } catch (e: java.lang.Exception) {
+                    } catch (e: Throwable) {
                         val msg = e.message ?: e::class.simpleName ?: "Unknown error"
                         _state.value = ExtractState.Error(msg)
                         saveErrorLog(e, msg)
                     }
                 }
-            } catch (e: java.lang.Exception) {
+            } catch (e: Throwable) {
                 val msg = "Unexpected: ${e.message}"
                 _state.value = ExtractState.Error(msg)
                 saveErrorLog(e, msg)
@@ -423,7 +423,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 addToHistory(fileName, analysis.packs)
                 _state.value = ExtractState.SentToMinecraft(intent)
-            } catch (e: java.lang.Exception) {
+            } catch (e: Throwable) {
                 _state.value = ExtractState.Error("Failed: ${e.message}")
             }
         }
@@ -452,7 +452,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.value = ExtractState.Idle
     }
 
-    private fun saveErrorLog(e: java.lang.Exception, msg: String) {
+    private fun saveErrorLog(e: Throwable, msg: String) {
         try {
             val ctx = getApplication<Application>()
             val dir = ctx.filesDir

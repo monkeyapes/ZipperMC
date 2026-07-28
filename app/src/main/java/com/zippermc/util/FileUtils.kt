@@ -19,7 +19,7 @@ object FileUtils {
                 }
             }
             name
-        } catch (_: Exception) { uri.lastPathSegment ?: "unknown.zip" }
+        } catch (_: Throwable) { uri.lastPathSegment ?: "unknown.zip" }
     }
 
     fun copyToCache(context: Context, uri: Uri): File? {
@@ -34,7 +34,7 @@ object FileUtils {
                 }
             }
             if (cacheFile.isFile && cacheFile.length() > 0) cacheFile else { cacheFile.delete(); null }
-        } catch (_: Exception) { null }
+        } catch (_: Throwable) { null }
     }
 
     fun sanitizeFileName(name: String): String {
