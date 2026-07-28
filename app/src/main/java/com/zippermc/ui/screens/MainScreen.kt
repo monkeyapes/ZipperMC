@@ -188,7 +188,6 @@ private fun HomeTab(viewModel: MainViewModel, snackbarHostState: SnackbarHostSta
     val scannedFiles by viewModel.scannedFiles.collectAsState()
     val mcInstalls by viewModel.mcInstalls.collectAsState()
     val selectedMc by viewModel.selectedMc.collectAsState()
-    val context = LocalContext.current
     var showMcSheet by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState()
 

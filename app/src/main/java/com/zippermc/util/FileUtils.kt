@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import java.io.File
 import java.io.FileOutputStream
+import java.io.BufferedInputStream
 
 object FileUtils {
     fun getFileName(context: Context, uri: Uri): String {
@@ -24,16 +25,35 @@ object FileUtils {
 
     fun copyToCache(context: Context, uri: Uri): File? {
         return try {
-            val name = getFileName(context, uri)
+            val name = sanitizeFileName(getFileName(context, uri))
             val cacheFile = File(context.cacheDir, name)
-            val input = context.contentResolver.openInputStream(uri)
-            if (input == null) { cacheFile.delete(); return null }
-            input.use { inp ->
-                FileOutputStream(cacheFile).use { out ->
-                    inp.copyTo(out)
+            val ok = try {
+                val afd = context.contentResolver.openTypedAssetFileDescriptor(uri, "*/*", null)
+                if (afd == null) throw Exception("no afd")
+                afd.use { fd ->
+                    FileOutputStream(cacheFile).use { out ->
+                        val buf = ByteArray(8192)
+                        var read: Int
+                        val fis = fd.createInputStream()
+                        while (fis.read(buf).also { read = it } != -1) {
+                            out.write(buf, 0, read)
+                        }
+                    }
                 }
+                true
+            } catch (_: Throwable) {
+                try {
+                    val input = context.contentResolver.openInputStream(uri)
+                    if (input == null) { cacheFile.delete(); return null }
+                    BufferedInputStream(input).use { inp ->
+                        FileOutputStream(cacheFile).use { out ->
+                            inp.copyTo(out)
+                        }
+                    }
+                    true
+                } catch (_: Throwable) { false }
             }
-            if (cacheFile.isFile && cacheFile.length() > 0) cacheFile else { cacheFile.delete(); null }
+            if (ok && cacheFile.isFile && cacheFile.length() > 0) cacheFile else { cacheFile.delete(); null }
         } catch (_: Throwable) { null }
     }
 

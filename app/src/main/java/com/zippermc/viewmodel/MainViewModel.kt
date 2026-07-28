@@ -184,7 +184,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         saveHistory()
     }
 
-    fun onHistoryItemClicked(history: PackHistory) {}
+    fun onHistoryItemClicked(history: PackHistory) { /* reserved for future use */ }
 
     fun clearHistory() {
         _history.value = emptyList()
@@ -350,7 +350,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         if (selectedInstall == null) detectInstallations()
                         _state.value = ExtractState.Analyzing("Preparing...")
 
-                        val fileName = withContext(Dispatchers.IO) { FileUtils.getFileName(ctx, uri) }
+                        val dispName = withContext(Dispatchers.IO) { FileUtils.getFileName(ctx, uri) }
+                        _state.value = ExtractState.Analyzing(dispName)
                         val file = withContext(Dispatchers.IO) { FileUtils.copyToCache(ctx, uri) }
                         if (file == null) {
                             _state.value = ExtractState.Error("Failed to read file")
@@ -389,7 +390,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             mcVersion = selectedInstall?.versionName,
                         )
                     } catch (e: Throwable) {
-                        val msg = e.message ?: e::class.simpleName ?: "Unknown error"
+                        val detail = cachedFile?.let { "${it.name} (${it.length()}b)" } ?: "(no file)"
+                        val msg = "${e.message ?: e::class.simpleName} — $detail"
                         _state.value = ExtractState.Error(msg)
                         saveErrorLog(e, msg)
                     }
