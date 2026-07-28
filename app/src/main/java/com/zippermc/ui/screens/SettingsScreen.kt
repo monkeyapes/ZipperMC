@@ -1,6 +1,7 @@
 package com.zippermc.ui.screens
 
 import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,7 +24,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -115,7 +115,9 @@ fun SettingsScreen(viewModel: MainViewModel, onToggleTheme: () -> Unit) {
                                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                     }
                                     context.startActivity(Intent.createChooser(intent, "Share crash log"))
-                                } catch (_: Exception) {}
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Share failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
                             },
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
