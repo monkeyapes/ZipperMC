@@ -259,13 +259,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.value = ExtractState.Installing(0f, file.name)
         viewModelScope.launch {
             try {
-                val repacked = withContext(Dispatchers.IO) { PackRepacker.repack(file, versionOverrides) }
+                val repacked = withContext(Dispatchers.IO) { PackRepacker.repack(file, versionOverrides, currentAnalysis ?: analysis) }
+                val convertedNote = if (repacked.name != file.name) " (converted to ${repacked.extension})" else ""
                 val ctx = getApplication<Application>()
                 val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.provider", repacked)
                 val intent = Intent(Intent.ACTION_VIEW).apply { setDataAndType(uri, "application/octet-stream"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION); setPackage(target.packageName) }
-                addToHistory(file.name, analysis.packs)
+                addToHistory(repacked.name, analysis.packs)
                 _state.value = ExtractState.SentToMinecraft(intent)
-                event("Sent to ${target.packageName}")
+                event("Sent ${repacked.name} to ${target.packageName}$convertedNote")
             } catch (e: Throwable) { _state.value = ExtractState.Error("Failed: ${e.message}"); event("Send failed: ${e.message}") }
         }
     }
