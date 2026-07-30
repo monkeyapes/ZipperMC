@@ -5,6 +5,8 @@ import com.zippermc.model.PackInfo
 import com.zippermc.model.ZipEntryType
 import java.io.File
 import java.io.FileInputStream
+import java.io.RandomAccessFile
+import java.util.jar.JarFile
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
@@ -12,63 +14,195 @@ import java.util.zip.ZipInputStream
 object ZipAnalyzer {
 
     fun analyze(file: File): AnalysisResult {
-        val magic = try {
-            FileInputStream(file).use { `in` ->
-                val buf = ByteArray(4); val n = `in`.read(buf)
-                if (n > 0) buf.copyOf(n) else byteArrayOf()
-            }
-        } catch (_: Exception) { byteArrayOf() }
-        val magicHex = magic.joinToString("") { "%02X".format(it) }
-        try {
-            return ZipFile(file).use { zip -> fromZipFile(zip, file) }
-        } catch (e1: Exception) {
-            try {
-                return FileInputStream(file).use { fis ->
-                    ZipInputStream(fis).use { zis -> fromZipStream(zis, file) }
-                }
-            } catch (e2: Exception) {
-                throw Exception("magic=$magicHex, size=${file.length()}, zipErr=${e1.message}, streamErr=${e2.message}")
-            }
+        val size = file.length()
+        val magic = readMagic(file)
+
+        val packsFromContent = readPacksFromContent(file, magic, size)
+        if (packsFromContent != null) {
+            return packsFromContent
         }
+
+        val packsFromExtension = packsByExtension(file)
+        if (packsFromExtension != null) return packsFromExtension
+
+        return AnalysisResult(
+            packs = listOf(PackInfo(ZipEntryType.UNKNOWN, file.nameWithoutExtension, "")),
+            totalEntryCount = 0,
+            fileName = file.name,
+        )
     }
 
-    private fun fromZipFile(zip: ZipFile, file: File): AnalysisResult {
-        val entries = zip.entries().asSequence().toList()
-        val entryNames = entries.map { it.name }
+    private fun readPacksFromContent(file: File, magic: ByteArray, size: Long): AnalysisResult? {
+        val attempts = listOf(
+            { readViaZipFile(file) },
+            { readViaJarFile(file) },
+            { readViaZipStream(file) },
+            { readViaManualScan(file, magic) },
+        )
+        for (attempt in attempts) {
+            try {
+                val result = attempt() ?: continue
+                if (result.packs.isNotEmpty() || result.totalEntryCount > 0) {
+                    return result
+                }
+            } catch (_: Exception) {}
+        }
+        return null
+    }
+
+    private fun readMagic(file: File): ByteArray = try {
+        RandomAccessFile(file, "r").use { raf ->
+            val buf = ByteArray(8); val n = raf.read(buf)
+            if (n > 0) buf.copyOf(n) else byteArrayOf()
+        }
+    } catch (_: Exception) { byteArrayOf() }
+
+    private fun magicHex(buf: ByteArray): String =
+        buf.joinToString("") { "%02X".format(it) }
+
+    private fun isZipMagic(buf: ByteArray): Boolean =
+        buf.size >= 2 && buf[0] == 0x50.toByte() && buf[1] == 0x4B.toByte()
+
+    private fun readViaZipFile(file: File): AnalysisResult? {
+        try {
+            ZipFile(file).use { zip ->
+                val entries = zip.entries().asSequence().toList()
+                val entryNames = entries.map { it.name }
+                val contents = readEntryContents(zip, entries)
+                val result = buildResult(entryNames, contents, file, entries.size)
+                if (result.packs.isNotEmpty()) return result
+            }
+        } catch (_: Exception) {}
+        return null
+    }
+
+    private fun readViaJarFile(file: File): AnalysisResult? {
+        try {
+            JarFile(file).use { jar ->
+                val entries = jar.entries().asSequence().toList()
+                val entryNames = entries.map { it.name }
+                val contents = mutableMapOf<String, String>()
+                for (entry in entries) {
+                    if (isManifestKey(entry.name)) {
+                        try {
+                            contents[entry.name] = jar.getInputStream(entry).bufferedReader().use { it.readText() }
+                        } catch (_: Exception) {}
+                    }
+                }
+                val result = buildResult(entryNames, contents, file, entries.size)
+                if (result.packs.isNotEmpty()) return result
+            }
+        } catch (_: Exception) {}
+        return null
+    }
+
+    private fun readViaZipStream(file: File): AnalysisResult? {
+        try {
+            FileInputStream(file).use { fis ->
+                ZipInputStream(fis).use { zis ->
+                    val entryNames = mutableListOf<String>()
+                    val contents = mutableMapOf<String, String>()
+                    var ze: ZipEntry? = zis.nextEntry
+                    while (ze != null) {
+                        val name = ze.name
+                        entryNames.add(name)
+                        if (isManifestKey(name)) {
+                            try {
+                                contents[name] = zis.bufferedReader().use { it.readText() }
+                            } catch (_: Exception) {}
+                        }
+                        zis.closeEntry()
+                        ze = zis.nextEntry
+                    }
+                    val result = buildResult(entryNames, contents, file, entryNames.size)
+                    if (result.packs.isNotEmpty() || result.totalEntryCount > 0) return result
+                }
+            }
+        } catch (_: Exception) {}
+        return null
+    }
+
+    private fun readViaManualScan(file: File, magic: ByteArray): AnalysisResult? {
+        if (!isZipMagic(magic)) return null
+        try {
+            RandomAccessFile(file, "r").use { raf ->
+                val entryNames = mutableListOf<String>()
+                val fileLen = raf.length()
+                var pos = 0L
+                val buf = ByteArray(4)
+
+                val localHeaderSig = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
+                val centralDirSig = byteArrayOf(0x50, 0x4B, 0x01, 0x02)
+                val eocdSig = byteArrayOf(0x50, 0x4B, 0x05, 0x06)
+
+                while (pos < fileLen - 4) {
+                    raf.seek(pos)
+                    raf.readFully(buf)
+                    if (buf.contentEquals(localHeaderSig)) {
+                        raf.seek(pos + 26)
+                        val nameLen = readLEShort(raf)
+                        val extraLen = readLEShort(raf)
+                        if (nameLen > 0 && nameLen < 65535) {
+                            raf.seek(pos + 30)
+                            val nameBytes = ByteArray(nameLen)
+                            raf.readFully(nameBytes)
+                            val name = try { String(nameBytes, Charsets.UTF_8) } catch (_: Exception) { null }
+                            if (name != null && name.isNotBlank()) {
+                                entryNames.add(name)
+                            }
+                        }
+                        val headerSize = 30 + nameLen + extraLen
+                        val compSize = try {
+                            raf.seek(pos + 18); readLEInt(raf)
+                        } catch (_: Exception) { 0 }
+                        pos += headerSize + compSize
+                    } else if (buf.contentEquals(centralDirSig) || buf.contentEquals(eocdSig)) {
+                        break
+                    } else {
+                        pos++
+                    }
+                }
+
+                if (entryNames.isNotEmpty()) {
+                    val result = buildResult(entryNames, emptyMap(), file, entryNames.size)
+                    if (result.packs.isNotEmpty()) return result
+                    return result
+                }
+            }
+        } catch (_: Exception) {}
+        return null
+    }
+
+    private fun readEntryContents(zip: ZipFile, entries: List<ZipEntry>): Map<String, String> {
         val contents = mutableMapOf<String, String>()
         for (entry in entries) {
-            val name = entry.name
-            if (isManifestEntry(name)) {
+            if (isManifestKey(entry.name)) {
                 try {
-                    contents[name] = zip.getInputStream(entry).bufferedReader().use { it.readText() }
+                    contents[entry.name] = zip.getInputStream(entry).bufferedReader().use { it.readText() }
                 } catch (_: Exception) {}
             }
         }
-        return fromEntryData(entryNames, contents, file, entries.size)
+        return contents
     }
 
-    private fun fromZipStream(zis: ZipInputStream, file: File): AnalysisResult {
-        val entryNames = mutableListOf<String>()
-        val contents = mutableMapOf<String, String>()
-        var ze: ZipEntry? = zis.nextEntry
-        while (ze != null) {
-            val name = ze.name
-            entryNames.add(name)
-            if (isManifestEntry(name)) {
-                try {
-                    contents[name] = zis.bufferedReader().use { it.readText() }
-                } catch (_: Exception) {}
-            }
-            zis.closeEntry()
-            ze = zis.nextEntry
-        }
-        return fromEntryData(entryNames, contents, file, entryNames.size)
-    }
-
-    private fun isManifestEntry(name: String): Boolean =
+    private fun isManifestKey(name: String): Boolean =
         name.endsWith("manifest.json") || name == "levelname.txt" || name == "skins.json"
 
-    private fun fromEntryData(
+    private fun readLEShort(raf: RandomAccessFile): Int {
+        val lo = raf.readUnsignedByte()
+        val hi = raf.readUnsignedByte()
+        return (hi shl 8) or lo
+    }
+
+    private fun readLEInt(raf: RandomAccessFile): Long {
+        val b0 = raf.readUnsignedByte().toLong()
+        val b1 = raf.readUnsignedByte().toLong()
+        val b2 = raf.readUnsignedByte().toLong()
+        val b3 = raf.readUnsignedByte().toLong()
+        return (b3 shl 24) or (b2 shl 16) or (b1 shl 8) or b0
+    }
+
+    private fun buildResult(
         entryNames: List<String>,
         contents: Map<String, String>,
         file: File,
@@ -109,10 +243,19 @@ object ZipAnalyzer {
         }
 
         if (packs.isEmpty()) {
-            val nestedZips = entryNames.filter { e -> !e.endsWith("/") && (e.endsWith(".mcpack") || e.endsWith(".mcaddon") || e.endsWith(".zip")) }
+            val nestedZips = entryNames.filter { e ->
+                !e.endsWith("/") && (e.endsWith(".mcpack") || e.endsWith(".mcaddon") || e.endsWith(".zip") || e.endsWith(".mcworld") || e.endsWith(".mctemplate"))
+            }
             if (nestedZips.isNotEmpty()) {
                 for (n in nestedZips) {
-                    packs.add(PackInfo(ZipEntryType.UNKNOWN, n.substringBeforeLast("."), n))
+                    val ext = n.substringAfterLast(".", "")
+                    val guessedType = when (ext) {
+                        "mcworld", "mctemplate" -> ZipEntryType.WORLD
+                        "mcskin" -> ZipEntryType.SKIN_PACK
+                        "mcaddon" -> ZipEntryType.UNKNOWN
+                        else -> ZipEntryType.UNKNOWN
+                    }
+                    packs.add(PackInfo(guessedType, n.substringBeforeLast("."), n))
                 }
             } else {
                 val type = guessByStructure(entryNames)
@@ -123,6 +266,21 @@ object ZipAnalyzer {
         return AnalysisResult(
             packs = packs.distinctBy { it.subPath },
             totalEntryCount = totalEntries,
+            fileName = file.name,
+        )
+    }
+
+    private fun packsByExtension(file: File): AnalysisResult? {
+        val ext = file.extension.lowercase()
+        val type = when (ext) {
+            "mcworld", "mctemplate" -> ZipEntryType.WORLD
+            "mcskin" -> ZipEntryType.SKIN_PACK
+            "mcaddon", "mcpack", "zip" -> ZipEntryType.UNKNOWN
+            else -> return null
+        }
+        return AnalysisResult(
+            packs = listOf(PackInfo(type, file.nameWithoutExtension, "")),
+            totalEntryCount = 0,
             fileName = file.name,
         )
     }
