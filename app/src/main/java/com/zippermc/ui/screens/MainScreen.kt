@@ -264,7 +264,7 @@ private fun HomeTab(viewModel: MainViewModel, snackbarHostState: SnackbarHostSta
                 )
             }
         }
-        is ExtractState.SentToMinecraft -> SentToMinecraftContent(s.intent)
+        is ExtractState.SentToMinecraft -> SentToMinecraftContent(s.intent) { viewModel.reset() }
         else -> {
             val cur = state
             when (cur) {
@@ -300,13 +300,20 @@ private fun HomeTab(viewModel: MainViewModel, snackbarHostState: SnackbarHostSta
 }
 
 @Composable
-private fun SentToMinecraftContent(intent: Intent) {
+private fun SentToMinecraftContent(intent: Intent, onDone: () -> Unit) {
     val context = LocalContext.current
     val msg = stringResource(com.zippermc.R.string.minecraft_not_installed)
     LaunchedEffect(Unit) {
-        try { context.startActivity(intent) } catch (_: ActivityNotFoundException) {
+        try {
+            context.startActivity(intent)
+            onDone()
+        } catch (_: ActivityNotFoundException) {
             Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            onDone()
         }
+    }
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Text("Sent to Minecraft", style = MaterialTheme.typography.titleLarge)
     }
 }
 
