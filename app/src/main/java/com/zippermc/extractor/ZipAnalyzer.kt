@@ -5,18 +5,33 @@ import com.zippermc.model.PackInfo
 import com.zippermc.model.ZipEntryType
 import java.io.File
 import java.io.FileInputStream
+import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
 
 object ZipAnalyzer {
 
     fun analyze(file: File): AnalysisResult? {
-        return try {
-            val entryMap = readAllEntries(file) ?: return null
-            buildResult(entryMap, file)
-        } catch (_: Throwable) { null }
+        val entries = readViaZipFile(file) ?: readViaZipStream(file) ?: return null
+        return try { buildResult(entries, file) } catch (_: Throwable) { null }
     }
 
-    private fun readAllEntries(file: File): Map<String, String?>? {
+    private fun readViaZipFile(file: File): Map<String, String?>? {
+        try {
+            ZipFile(file).use { zip ->
+                val entries = mutableMapOf<String, String?>()
+                val names = zip.entries().asSequence().toList()
+                for (entry in names.take(1000)) {
+                    val name = safe(entry.name) ?: continue
+                    entries[name] = if (isManifestKey(name)) try {
+                        zip.getInputStream(entry).bufferedReader().use { it.readText() }
+                    } catch (_: Throwable) { null } else null
+                }
+                return entries.takeIf { it.isNotEmpty() }
+            }
+        } catch (_: Throwable) { return null }
+    }
+
+    private fun readViaZipStream(file: File): Map<String, String?>? {
         try {
             ZipInputStream(FileInputStream(file)).use { zis ->
                 val entries = mutableMapOf<String, String?>()
@@ -31,8 +46,7 @@ object ZipAnalyzer {
                     zis.closeEntry()
                     ze = zis.nextEntry
                 }
-                if (entries.isEmpty()) return null
-                return entries
+                return entries.takeIf { it.isNotEmpty() }
             }
         } catch (_: Throwable) { return null }
     }
@@ -99,12 +113,18 @@ object ZipAnalyzer {
 
     fun fromExtension(file: File): AnalysisResult {
         val ext = file.extension.lowercase()
+        val name = file.nameWithoutExtension
         val type = when (ext) {
             "mcworld", "mctemplate" -> ZipEntryType.WORLD
             "mcskin" -> ZipEntryType.SKIN_PACK
             else -> ZipEntryType.UNKNOWN
         }
-        return AnalysisResult(listOf(PackInfo(type, file.nameWithoutExtension, "")), 0, file.name)
+        return AnalysisResult(listOf(PackInfo(type, name, "")), 0, file.name)
+    }
+
+    fun isMinecraftExt(fileName: String): Boolean {
+        val ext = fileName.substringAfterLast(".").lowercase()
+        return ext in setOf("mcaddon", "mcpack", "mcworld", "mctemplate", "mcskin", "mcres")
     }
 
     private fun findManifests(names: List<String>, rootFiles: Set<String>, subDirs: List<String>): List<Pair<String, String>> {

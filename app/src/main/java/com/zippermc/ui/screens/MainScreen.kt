@@ -302,14 +302,21 @@ private fun HomeTab(viewModel: MainViewModel, snackbarHostState: SnackbarHostSta
 @Composable
 private fun SentToMinecraftContent(intent: Intent, onDone: () -> Unit) {
     val context = LocalContext.current
-    val msg = stringResource(com.zippermc.R.string.minecraft_not_installed)
+    val msg = context.getString(com.zippermc.R.string.minecraft_not_installed)
+    val chooserTitle = context.getString(com.zippermc.R.string.open_with)
     LaunchedEffect(Unit) {
         try {
             context.startActivity(intent)
             onDone()
         } catch (_: ActivityNotFoundException) {
-            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-            onDone()
+            try {
+                val fallback = Intent(intent).apply { setPackage(null) }
+                context.startActivity(Intent.createChooser(fallback, chooserTitle))
+                onDone()
+            } catch (_: ActivityNotFoundException) {
+                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                onDone()
+            }
         }
     }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
