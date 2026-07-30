@@ -4,6 +4,7 @@ import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,13 +19,17 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -38,6 +43,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import com.zippermc.ui.theme.Redstone
 import com.zippermc.viewmodel.MainViewModel
 import java.io.File
 
@@ -46,7 +52,6 @@ import java.io.File
 fun SettingsScreen(viewModel: MainViewModel, onToggleTheme: () -> Unit) {
     val autoScan by viewModel.autoScan.collectAsState()
     val darkTheme by viewModel.darkTheme.collectAsState()
-    val eventLog by viewModel.eventLog.collectAsState()
     val context = LocalContext.current
 
     val crashDir = context.filesDir
@@ -60,6 +65,7 @@ fun SettingsScreen(viewModel: MainViewModel, onToggleTheme: () -> Unit) {
         )
 
         Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
+            Text("General", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -70,94 +76,137 @@ fun SettingsScreen(viewModel: MainViewModel, onToggleTheme: () -> Unit) {
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(Icons.Default.Search, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
+                        Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(40.dp)) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Search, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                            }
+                        }
                         Spacer(Modifier.width(14.dp))
                         Column(Modifier.weight(1f)) {
                             Text("Auto-scan files", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                            Text("Scan Downloads for Minecraft files on launch", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Scan Downloads for Minecraft files on launch", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Switch(checked = autoScan, onCheckedChange = { viewModel.setAutoScan(it) })
                     }
-                    Spacer(Modifier.height(2.dp))
+                    HorizontalDivider(Modifier.padding(start = 70.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(Icons.Default.DarkMode, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
+                        Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(40.dp)) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.DarkMode, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                            }
+                        }
                         Spacer(Modifier.width(14.dp))
                         Column(Modifier.weight(1f)) {
                             Text("Dark theme", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                            Text("Use dark color scheme", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Use dark color scheme", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Switch(checked = darkTheme, onCheckedChange = { viewModel.setDarkTheme(it); onToggleTheme() })
                     }
                 }
             }
 
-            if (eventFile.exists()) {
-                Spacer(Modifier.height(16.dp))
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp).clickable {
-                            try {
-                                val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", eventFile)
-                                context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/plain"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                }, "Share event log"))
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "Share failed: ${e.message}", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.Default.Share, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("Share event log", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                            Text("${eventLog.size} events recorded", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
+            Spacer(Modifier.height(24.dp))
+            Text("Diagnostics", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            ) {
+                Column(Modifier.padding(4.dp)) {
+                    if (eventFile.exists()) {
+                        SettingsActionRow(
+                            icon = Icons.Default.Share,
+                            title = "Share event log",
+                            subtitle = "${viewModel.eventLog.collectAsState().value.size} events recorded",
+                            onClick = {
+                                try {
+                                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", eventFile)
+                                    context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }, "Share event log"))
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Share failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                        )
                     }
-                }
-            }
-
-            if (crashFiles.isNotEmpty()) {
-                Spacer(Modifier.height(16.dp))
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp).clickable {
-                            val latest = crashFiles.maxByOrNull { it.lastModified() } ?: return@clickable
-                            try {
-                                val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", latest)
-                                context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/plain"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                }, "Share crash log"))
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "Share failed: ${e.message}", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.Default.BugReport, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.error)
-                        Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("Share crash logs", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.error)
-                            Text("${crashFiles.size} crash log(s)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
+                    if (eventFile.exists() && crashFiles.isNotEmpty()) {
+                        HorizontalDivider(Modifier.padding(start = 70.dp))
+                    }
+                    if (crashFiles.isNotEmpty()) {
+                        SettingsActionRow(
+                            icon = Icons.Default.BugReport,
+                            title = "Share crash logs",
+                            subtitle = "${crashFiles.size} crash log(s)",
+                            tint = Redstone,
+                            onClick = {
+                                val latest = crashFiles.maxByOrNull { it.lastModified() } ?: return@SettingsActionRow
+                                try {
+                                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", latest)
+                                    context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }, "Share crash log"))
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Share failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                        )
                     }
                 }
             }
 
             Spacer(Modifier.height(24.dp))
-            val ver = try { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "?" } catch (_: Exception) { "?" }
-            Text("ZipperMC v$ver", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("About", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            ) {
+                Column(Modifier.padding(4.dp)) {
+                    SettingsActionRow(
+                        icon = Icons.Default.Info,
+                        title = "ZipperMC",
+                        subtitle = "v${try { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "?" } catch (_: Exception) { "?" }}",
+                        onClick = {},
+                    )
+                    HorizontalDivider(Modifier.padding(start = 70.dp))
+                    SettingsActionRow(
+                        icon = Icons.Default.Folder,
+                        title = "Open source",
+                        subtitle = "github.com/monkeyapes/ZipperMC",
+                        onClick = {},
+                    )
+                }
+            }
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+@Composable
+private fun SettingsActionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    tint: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.primary,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp).clickable(onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Surface(shape = RoundedCornerShape(8.dp), color = tint.copy(alpha = 0.12f), modifier = Modifier.size(40.dp)) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Icon(icon, null, Modifier.size(22.dp), tint = tint)
+            }
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = if (tint == Redstone) tint else MaterialTheme.colorScheme.onSurface)
+            Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

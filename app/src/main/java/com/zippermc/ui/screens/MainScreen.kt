@@ -7,6 +7,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -46,15 +47,14 @@ import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -64,7 +64,6 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SheetState
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -90,23 +89,33 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.zippermc.model.AnalysisResult
 import com.zippermc.model.ExtractState
 import com.zippermc.model.MinecraftInstall
 import com.zippermc.model.PackInfo
 import com.zippermc.model.ZipEntryType
+import com.zippermc.ui.theme.Amethyst
 import com.zippermc.ui.theme.DiamondBlue
 import com.zippermc.ui.theme.GrassGreen
+import com.zippermc.ui.theme.Redstone
 import com.zippermc.ui.theme.SkyBlue
 import com.zippermc.util.GitHubUpdate
 import com.zippermc.util.ScannedFile
 import com.zippermc.util.UpdateInfo
 import com.zippermc.viewmodel.MainViewModel
 import kotlinx.coroutines.launch
+
+private val PACK_TYPE_COLORS = mapOf(
+    ZipEntryType.RESOURCE_PACK to SkyBlue,
+    ZipEntryType.BEHAVIOR_PACK to GrassGreen,
+    ZipEntryType.WORLD to DiamondBlue,
+    ZipEntryType.SKIN_PACK to Amethyst,
+    ZipEntryType.UNKNOWN to Color(0xFF9E9E9E),
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -172,7 +181,7 @@ fun MainScreen(viewModel: MainViewModel, onToggleTheme: () -> Unit) {
         Box(Modifier.fillMaxSize().padding(padding)) {
             when (tab) {
                 0 -> HomeTab(viewModel, snackbarHostState, scope)
-                 1 -> HistoryScreen(viewModel, snackbarHostState)
+                1 -> HistoryScreen(viewModel, snackbarHostState)
                 2 -> SettingsScreen(viewModel, onToggleTheme)
             }
         }
@@ -202,9 +211,6 @@ private fun HomeTab(viewModel: MainViewModel, snackbarHostState: SnackbarHostSta
                 scope.launch { snackbarHostState.showSnackbar(msg) }
                 viewModel.reset()
             }
-            is ExtractState.Success -> {
-                scope.launch { snackbarHostState.showSnackbar("Done! Packs ready.") }
-            }
             else -> {}
         }
     }
@@ -220,18 +226,13 @@ private fun HomeTab(viewModel: MainViewModel, snackbarHostState: SnackbarHostSta
                 mcInstalls.forEach { mc ->
                     val isSelected = mc.packageName == selectedMc?.packageName
                     Row(
-                        modifier = Modifier.fillMaxWidth().clickable {
-                            viewModel.setSelectedInstall(mc); showMcSheet = false
-                        }.padding(vertical = 12.dp),
+                        modifier = Modifier.fillMaxWidth().clickable { viewModel.setSelectedInstall(mc); showMcSheet = false }.padding(vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Box(
-                            modifier = Modifier.size(24.dp).clip(CircleShape).background(
-                                if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
-                            ),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (isSelected) Icon(Icons.Default.CheckCircle, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onPrimary)
+                        Surface(shape = CircleShape, color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.size(24.dp)) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                if (isSelected) Icon(Icons.Default.CheckCircle, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onPrimary)
+                            }
                         }
                         Spacer(Modifier.width(16.dp))
                         Column(Modifier.weight(1f)) {
@@ -280,7 +281,6 @@ private fun HomeTab(viewModel: MainViewModel, snackbarHostState: SnackbarHostSta
                     result = cur.result,
                     mcVersion = cur.mcVersion,
                     selectedMc = selectedMc,
-                    hasOverrides = viewModel.parseVersions(cur.result.packs.firstOrNull()?.manifestJson).first != (cur.mcVersion ?: ""),
                     onSendToMinecraft = { viewModel.sendToMinecraft(cur.result) },
                     onEditVersion = { viewModel.startVersionEdit(it) },
                     onPickAnother = { filePicker.launch(arrayOf("*/*")) },
@@ -320,7 +320,17 @@ private fun SentToMinecraftContent(intent: Intent, onDone: () -> Unit) {
         }
     }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("Sent to Minecraft", style = MaterialTheme.typography.titleLarge)
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(80.dp)) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.CheckCircle, null, Modifier.size(44.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+            Text("Sent to Minecraft", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            Text("Opening in Minecraft\u2026", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
@@ -347,14 +357,14 @@ private fun IdleContent(
                 modifier = Modifier.padding(top = 32.dp, bottom = 28.dp).fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(80.dp)) {
+                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f), modifier = Modifier.size(88.dp)) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.Inventory2, null, Modifier.size(44.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                        Icon(Icons.Default.Inventory2, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onPrimary)
                     }
                 }
                 Spacer(Modifier.height(14.dp))
-                Text("ZipperMC", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
-                Text(stringResource(com.zippermc.R.string.mc_addon_installer), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f))
+                Text("ZipperMC", style = MaterialTheme.typography.displayLarge, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
+                Text("Minecraft Addon Installer", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f))
             }
         }
 
@@ -364,17 +374,18 @@ private fun IdleContent(
                     modifier = Modifier.fillMaxWidth().clickable { onSelectMc() },
                     shape = RoundedCornerShape(16.dp),
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 ) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(44.dp)) {
+                        Surface(shape = RoundedCornerShape(10.dp), color = PACK_TYPE_COLORS.getValue(ZipEntryType.UNKNOWN).copy(alpha = 0.12f), modifier = Modifier.size(48.dp)) {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.GridOn, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                                Icon(Icons.Default.GridOn, null, Modifier.size(26.dp), tint = PACK_TYPE_COLORS.getValue(ZipEntryType.UNKNOWN))
                             }
                         }
                         Spacer(Modifier.width(14.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(selectedMc?.label ?: "Select Minecraft", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                            Text("v${selectedMc?.versionName ?: "?"} \u2022 ${mcInstalls.size} installed", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(selectedMc?.label ?: "Select Minecraft", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                            Text("v${selectedMc?.versionName ?: "?"} \u2022 ${mcInstalls.size} installation(s)", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Icon(Icons.Default.FolderOpen, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -386,7 +397,7 @@ private fun IdleContent(
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 10.dp)) {
                     Icon(Icons.Default.Search, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.width(6.dp))
-                    Text(stringResource(com.zippermc.R.string.found_files), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("Found files", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.width(6.dp))
                     Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
                         Text("${scannedFiles.size}", modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
@@ -399,7 +410,7 @@ private fun IdleContent(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(bottom = 4.dp),
                 ) {
-                    items(scannedFiles.take(6)) { file ->
+                    items(scannedFiles.take(8)) { file ->
                         Card(
                             modifier = Modifier.fillMaxWidth().clickable { onPickScanned(file.uri) },
                             shape = RoundedCornerShape(14.dp),
@@ -407,20 +418,15 @@ private fun IdleContent(
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         ) {
                             Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                val ext = file.name.substringAfterLast('.', "")
+                                val (icon, _) = iconAndLabel(extToType(ext))
                                 Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(48.dp)) {
                                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                        val ext = file.name.substringAfterLast('.', "")
-                                        val icon = when (ext) {
-                                            "mcaddon", "mcpack" -> Icons.Default.Inventory2
-                                            "mcworld" -> Icons.Default.GridOn
-                                            "mcskin" -> Icons.Default.Person
-                                            else -> Icons.Default.Folder
-                                        }
                                         Icon(icon, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
                                     }
                                 }
                                 Spacer(Modifier.height(8.dp))
-                                Text(file.name, style = MaterialTheme.typography.bodySmall, maxLines = 2, textAlign = TextAlign.Center)
+                                Text(file.name, style = MaterialTheme.typography.bodySmall, maxLines = 2, textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis)
                                 Text(formatSize(file.size), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
@@ -431,14 +437,14 @@ private fun IdleContent(
 
             Button(
                 onClick = onPickZip,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
+                modifier = Modifier.fillMaxWidth().height(54.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp),
             ) {
                 Icon(Icons.Default.Folder, null)
                 Spacer(Modifier.width(10.dp))
-                Text(stringResource(com.zippermc.R.string.browse_files), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                Text("Browse Files", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
             }
             Spacer(Modifier.height(24.dp))
         }
@@ -448,12 +454,18 @@ private fun IdleContent(
 @Composable
 private fun AnalyzingContent(fileName: String) {
     Column(Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        LinearProgressIndicator(modifier = Modifier.width(120.dp))
+        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f), modifier = Modifier.size(80.dp)) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.Search, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)
+            }
+        }
         Spacer(Modifier.height(20.dp))
-        Text(stringResource(com.zippermc.R.string.analyzing), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(6.dp))
+        Text("Analyzing\u2026", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(16.dp))
+        LinearProgressIndicator(modifier = Modifier.width(160.dp))
+        Spacer(Modifier.height(12.dp))
         Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-            Text(fileName, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, textAlign = TextAlign.Center)
+            Text(fileName, modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, textAlign = TextAlign.Center)
         }
     }
 }
@@ -464,7 +476,6 @@ private fun ReadyContent(
     result: AnalysisResult,
     mcVersion: String?,
     selectedMc: MinecraftInstall?,
-    hasOverrides: Boolean,
     onSendToMinecraft: () -> Unit,
     onEditVersion: (Int) -> Unit,
     onPickAnother: () -> Unit,
@@ -484,74 +495,67 @@ private fun ReadyContent(
             ),
         ) {
             Column(
-                modifier = Modifier.padding(top = 32.dp, bottom = 24.dp).fillMaxWidth(),
+                modifier = Modifier.padding(top = 28.dp, bottom = 24.dp).fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(64.dp)) {
+                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f), modifier = Modifier.size(72.dp)) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(34.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                        Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(38.dp), tint = MaterialTheme.colorScheme.onPrimary)
                     }
                 }
                 Spacer(Modifier.height(10.dp))
-                Text(stringResource(com.zippermc.R.string.ready_to_install), style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
+                Text("Ready to Send", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
             }
         }
 
         Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(44.dp)) {
+                Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(48.dp)) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.Inventory2, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                        Icon(Icons.Default.Inventory2, null, Modifier.size(26.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
                     }
                 }
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(result.fileName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Row(Modifier.clickable(onClick = onChangeMc)) {
-                        Text(selectedMc?.let { "${it.label} v${it.versionName}" } ?: "Select Minecraft", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(result.fileName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(Modifier.clickable(onClick = onChangeMc), verticalAlignment = Alignment.CenterVertically) {
+                        Text(selectedMc?.let { "${it.label} v${it.versionName}" } ?: "Select Minecraft", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.width(4.dp))
                         Icon(Icons.Default.FolderOpen, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
 
-            if (mcVersion != null && hasOverrides) {
-                Spacer(Modifier.height(12.dp))
-                Surface(shape = RoundedCornerShape(8.dp), color = DiamondBlue.copy(alpha = 0.12f)) {
-                    Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Info, null, Modifier.size(16.dp), tint = DiamondBlue)
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(com.zippermc.R.string.auto_adjusted, mcVersion), style = MaterialTheme.typography.bodySmall, color = DiamondBlue, fontWeight = FontWeight.Medium)
+            if (result.packs.isNotEmpty()) {
+                Spacer(Modifier.height(16.dp))
+                if (types.size > 1) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(selected = filterType == null, onClick = { filterType = null }, label = { Text("All") })
+                        types.forEach { t ->
+                            val (_, label) = iconAndLabel(t)
+                            FilterChip(selected = filterType == t, onClick = { filterType = if (filterType == t) null else t }, label = { Text(label) })
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                }
+
+                result.packs.forEachIndexed { i, pack ->
+                    if (filterType == null || pack.type == filterType) {
+                        if (i > 0) Spacer(Modifier.height(8.dp))
+                        PackCard(pack) { onEditVersion(result.packs.indexOf(pack)) }
                     }
                 }
             }
 
-            if (types.size > 1) {
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = filterType == null, onClick = { filterType = null }, label = { Text("All") })
-                    types.forEach { t ->
-                        val (_, label) = iconAndLabel(t)
-                        FilterChip(selected = filterType == t, onClick = { filterType = if (filterType == t) null else t }, label = { Text(label) })
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
-            result.packs.forEachIndexed { i, pack ->
-                if (filterType == null || pack.type == filterType) {
-                    if (i > 0) Spacer(Modifier.height(8.dp))
-                    PackCard(pack, onEditVersion = { onEditVersion(result.packs.indexOf(pack)) })
-                }
-            }
             if (filteredPacks.isEmpty()) {
-                Text(stringResource(com.zippermc.R.string.no_content), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(16.dp))
+                Text("No packs detected", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(20.dp))
             Button(
                 onClick = onSendToMinecraft,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
+                modifier = Modifier.fillMaxWidth().height(54.dp),
                 shape = RoundedCornerShape(14.dp),
                 enabled = filteredPacks.isNotEmpty(),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
@@ -559,7 +563,7 @@ private fun ReadyContent(
             ) {
                 Icon(Icons.AutoMirrored.Filled.Send, null)
                 Spacer(Modifier.width(10.dp))
-                Text(stringResource(com.zippermc.R.string.send_to_minecraft), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                Text("Send to Minecraft", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
             }
             Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -578,31 +582,34 @@ private fun ReadyContent(
 @Composable
 private fun PackCard(pack: PackInfo, onEditVersion: () -> Unit) {
     val (icon, label) = iconAndLabel(pack.type)
-    val chipColor = when (pack.type) {
-        ZipEntryType.RESOURCE_PACK -> SkyBlue
-        ZipEntryType.BEHAVIOR_PACK -> GrassGreen
-        ZipEntryType.WORLD -> DiamondBlue
-        ZipEntryType.SKIN_PACK -> Color(0xFFE040FB)
-        ZipEntryType.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val chipColor = PACK_TYPE_COLORS[pack.type] ?: MaterialTheme.colorScheme.onSurfaceVariant
+
+    val verInfo = pack.manifestJson?.let { parseManifestVersions(it) }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(14.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
     ) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Surface(shape = RoundedCornerShape(8.dp), color = chipColor.copy(alpha = 0.15f), modifier = Modifier.size(44.dp)) {
+            Surface(shape = RoundedCornerShape(10.dp), color = chipColor.copy(alpha = 0.15f), modifier = Modifier.size(48.dp)) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Icon(icon, null, Modifier.size(24.dp), tint = chipColor)
+                    Icon(icon, null, Modifier.size(26.dp), tint = chipColor)
                 }
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(pack.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                Text(pack.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(4.dp))
-                Surface(shape = RoundedCornerShape(4.dp), color = chipColor.copy(alpha = 0.12f)) {
-                    Text(label, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, color = chipColor, fontWeight = FontWeight.Medium)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(shape = RoundedCornerShape(4.dp), color = chipColor.copy(alpha = 0.12f)) {
+                        Text(label, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, color = chipColor, fontWeight = FontWeight.Medium)
+                    }
+                    if (verInfo != null && verInfo.first.isNotEmpty()) {
+                        Spacer(Modifier.width(8.dp))
+                        Text("v${verInfo.first.joinToString(".")}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
             if (pack.manifestJson != null) {
@@ -619,19 +626,34 @@ private fun PackCard(pack: PackInfo, onEditVersion: () -> Unit) {
 @Composable
 private fun InstallingContent(progress: Float, currentFile: String) {
     Column(Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f), modifier = Modifier.size(80.dp)) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.AccessTime, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)
+            }
+        }
         Spacer(Modifier.height(20.dp))
-        Text("Installing\u2026", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(20.dp))
-        LinearProgressIndicator(progress = progress, modifier = Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)))
+        Text("Preparing\u2026", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(16.dp))
+        LinearProgressIndicator(progress = progress, modifier = Modifier.fillMaxWidth(0.7f).height(10.dp).clip(RoundedCornerShape(5.dp)))
         Spacer(Modifier.height(10.dp))
         Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
         if (currentFile.isNotBlank()) {
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(10.dp))
             Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                Text(currentFile.takeLast(50), modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                Text(currentFile.takeLast(50), modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
             }
         }
     }
+}
+
+private fun parseManifestVersions(json: String): Pair<List<Int>, List<Int>> {
+    try {
+        val obj = org.json.JSONObject(json)
+        val header = obj.optJSONObject("header") ?: return emptyList<Int>() to emptyList()
+        val minEngine = header.optJSONArray("min_engine_version")?.let { a -> (0 until a.length()).mapNotNull { a.optInt(it, -1).takeIf { it >= 0 } } } ?: emptyList()
+        val packVer = header.optJSONArray("version")?.let { a -> (0 until a.length()).mapNotNull { a.optInt(it, -1).takeIf { it >= 0 } } } ?: emptyList()
+        return minEngine to packVer
+    } catch (_: Exception) { return emptyList<Int>() to emptyList() }
 }
 
 private fun formatSize(bytes: Long): String = when {
@@ -646,4 +668,11 @@ private fun iconAndLabel(type: ZipEntryType): Pair<ImageVector, String> = when (
     ZipEntryType.WORLD -> Icons.Default.GridOn to "World"
     ZipEntryType.SKIN_PACK -> Icons.Default.Person to "Skin Pack"
     ZipEntryType.UNKNOWN -> Icons.Default.Folder to "Files"
+}
+
+private fun extToType(ext: String): ZipEntryType = when (ext.lowercase()) {
+    "mcworld", "mctemplate" -> ZipEntryType.WORLD
+    "mcskin" -> ZipEntryType.SKIN_PACK
+    "mcaddon", "mcpack", "mcres", "zip", "jar" -> ZipEntryType.UNKNOWN
+    else -> ZipEntryType.UNKNOWN
 }
