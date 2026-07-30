@@ -11,8 +11,8 @@ android {
         applicationId = "com.zippermc"
         minSdk = 26
         targetSdk = 35
-        versionCode = 17
-        versionName = "1.6.0-beta.10"
+        versionCode = 18
+        versionName = "1.6.0-beta.11"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
