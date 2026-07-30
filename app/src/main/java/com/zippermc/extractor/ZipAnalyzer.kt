@@ -5,256 +5,139 @@ import com.zippermc.model.PackInfo
 import com.zippermc.model.ZipEntryType
 import java.io.File
 import java.io.FileInputStream
-import java.io.RandomAccessFile
-import java.util.zip.ZipEntry
-import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
 
 object ZipAnalyzer {
 
-    private const val MAX_ENTRIES = 2000
-    private const val MAX_NAME_LENGTH = 256
-
-    fun analyze(file: File): AnalysisResult {
-        val magic = readMagic(file)
-        val strategies = listOf(
-            { readViaZipFile(file) },
-            { readViaZipStream(file) },
-        )
-        for (strategy in strategies) {
-            try {
-                val result = strategy() ?: continue
-                if (result.packs.isNotEmpty() || result.totalEntryCount > 0) {
-                    return result
-                }
-            } catch (_: Exception) {}
-        }
-
-        return packsByExtension(file)
-            ?: AnalysisResult(
-                packs = listOf(PackInfo(ZipEntryType.UNKNOWN, safeName(file.nameWithoutExtension), "")),
-                totalEntryCount = 0,
-                fileName = file.name,
-            )
+    fun analyze(file: File): AnalysisResult? {
+        return try {
+            val entryMap = readAllEntries(file) ?: return null
+            buildResult(entryMap, file)
+        } catch (_: Throwable) { null }
     }
 
-    private fun readMagic(file: File): ByteArray = try {
-        RandomAccessFile(file, "r").use { raf ->
-            val buf = ByteArray(4); val n = raf.read(buf)
-            if (n > 0) buf.copyOf(n) else byteArrayOf()
-        }
-    } catch (_: Exception) { byteArrayOf() }
-
-    private fun safeName(name: String): String =
-        name.take(120).replace(Regex("[\u0000-\u001f]"), "").ifBlank { "Pack" }
-
-    private fun safeEntryNames(names: List<String>): List<String> =
-        names.map { it.take(MAX_NAME_LENGTH).replace(Regex("[\u0000-\u001f\u007f]"), "") }
-            .filter { it.isNotBlank() }
-            .take(MAX_ENTRIES)
-
-    private fun readViaZipFile(file: File): AnalysisResult? {
+    private fun readAllEntries(file: File): Map<String, String?>? {
         try {
-            ZipFile(file).use { zip ->
-                val entries = zip.entries().asSequence().toList()
-                val entryNames = safeEntryNames(entries.map { it.name })
-                val contents = readEntryContents(zip, entries, entryNames)
-                return buildResult(entryNames, contents, file, entries.size)
-            }
-        } catch (_: Exception) {}
-        return null
-    }
-
-    private fun readViaZipStream(file: File): AnalysisResult? {
-        try {
-            FileInputStream(file).use { fis ->
-                ZipInputStream(fis).use { zis ->
-                    val rawNames = mutableListOf<String>()
-                    val contents = mutableMapOf<String, String>()
-                    var ze: ZipEntry? = zis.nextEntry
-                    while (ze != null && rawNames.size < MAX_ENTRIES) {
-                        val name = ze.name
-                        rawNames.add(name)
-                        if (isManifestKey(name)) {
-                            try {
-                                contents[name] = zis.bufferedReader().use { it.readText() }
-                            } catch (_: Exception) {}
-                        }
-                        zis.closeEntry()
-                        ze = zis.nextEntry
+            ZipInputStream(FileInputStream(file)).use { zis ->
+                val entries = mutableMapOf<String, String?>()
+                var ze = zis.nextEntry
+                while (ze != null && entries.size < 500) {
+                    val name = safe(ze.name)
+                    if (name != null) {
+                        entries[name] = if (isManifestKey(name)) try {
+                            zis.bufferedReader().use { it.readText() }
+                        } catch (_: Throwable) { null } else null
                     }
-                    val entryNames = safeEntryNames(rawNames)
-                    return buildResult(entryNames, contents, file, rawNames.size)
+                    zis.closeEntry()
+                    ze = zis.nextEntry
                 }
+                if (entries.isEmpty()) return null
+                return entries
             }
-        } catch (_: Exception) {}
-        return null
+        } catch (_: Throwable) { return null }
     }
 
-    private fun readEntryContents(
-        zip: ZipFile,
-        entries: List<ZipEntry>,
-        validNames: List<String>,
-    ): Map<String, String> {
-        val validSet = validNames.toSet()
-        val contents = mutableMapOf<String, String>()
-        for (entry in entries) {
-            val name = entry.name
-            if (name in validSet && isManifestKey(name)) {
-                try {
-                    contents[name] = zip.getInputStream(entry).bufferedReader().use { it.readText() }
-                } catch (_: Exception) {}
-            }
-        }
-        return contents
+    private fun safe(name: String): String? {
+        val s = name.replace(Regex("[\u0000-\u001f\u007f]"), "").take(200)
+        return s.ifBlank { null }
     }
 
     private fun isManifestKey(name: String): Boolean =
         name.endsWith("manifest.json") || name == "levelname.txt" || name == "skins.json"
 
-    private fun buildResult(
-        entryNames: List<String>,
-        contents: Map<String, String>,
-        file: File,
-        totalEntries: Int,
-    ): AnalysisResult {
-        val rootFiles = entryNames.filter { "/" !in it }.toSet()
-        val subDirs = entryNames.map { it.substringBefore("/") }.distinct().filter { it.isNotBlank() }
-        val packs = mutableListOf<PackInfo>()
+    private fun buildResult(entries: Map<String, String?>, file: File): AnalysisResult? {
+        return try {
+            val names = entries.keys.toList()
+            val rootFiles = names.filter { "/" !in it }.toSet()
+            val subDirs = names.map { it.substringBefore("/") }.distinct().filter { it.isNotBlank() }
+            val packs = mutableListOf<PackInfo>()
+            val readText = { path: String -> entries[path] }
 
-        val manifestDirs = findManifestDirs(entryNames, rootFiles, subDirs)
+            if (rootFiles.contains("level.dat") || names.any { it.startsWith("db/") }) {
+                val wName = names.firstOrNull { it.endsWith("/levelname.txt") }?.let { readText(it) }?.trim()
+                    ?: subDirs.firstOrNull { it != "db" } ?: "World"
+                packs.add(PackInfo(ZipEntryType.WORLD, wName, ""))
+            }
 
-        if (rootFiles.contains("level.dat") || entryNames.any { it.startsWith("db/") }) {
-            val name = entryNames.firstOrNull { it.endsWith("/levelname.txt") }
-                ?.let { contents[it]?.trim() } ?: subDirs.firstOrNull { it != "db" } ?: "World"
-            packs.add(PackInfo(ZipEntryType.WORLD, safeName(name), ""))
-        }
+            if (rootFiles.contains("skins.json")) {
+                val text = readText("skins.json")
+                val sName = if (text != null) (jsonField(text, "name") ?: jsonField(text, "Name")) else null
+                packs.add(PackInfo(ZipEntryType.SKIN_PACK, sName ?: subDirs.firstOrNull() ?: "Skin Pack", ""))
+            }
 
-        if (rootFiles.contains("skins.json")) {
-            val text = contents["skins.json"]
-            val skinName = if (text != null) (parseJsonField(text, "name") ?: parseJsonField(text, "Name")) else null
-            packs.add(PackInfo(ZipEntryType.SKIN_PACK, safeName(skinName ?: subDirs.firstOrNull() ?: "Skin Pack"), ""))
-        }
-
-        for ((subPath, manifestPath) in manifestDirs) {
-            val jsonText = contents[manifestPath]
-            if (jsonText != null) {
-                val mType = parseJsonField(jsonText, "type")
-                val mName = parseManifestName(jsonText) ?: subPath.ifBlank { file.nameWithoutExtension }
-                if (mType != null) {
-                    val type = when (mType) {
-                        "resources" -> ZipEntryType.RESOURCE_PACK
-                        "data" -> ZipEntryType.BEHAVIOR_PACK
-                        else -> ZipEntryType.UNKNOWN
+            findManifests(names, rootFiles, subDirs).forEach { (sub, path) ->
+                val json = readText(path)
+                if (json != null) {
+                    val type = jsonField(json, "type")
+                    val mName = manifestName(json) ?: sub.ifBlank { file.nameWithoutExtension }
+                    if (type != null) {
+                        packs.add(PackInfo(
+                            type = when (type) { "resources" -> ZipEntryType.RESOURCE_PACK; "data" -> ZipEntryType.BEHAVIOR_PACK; else -> ZipEntryType.UNKNOWN },
+                            name = mName, subPath = sub, manifestJson = json,
+                        ))
                     }
-                    packs.add(PackInfo(type, safeName(mName), subPath, jsonText))
                 }
             }
-        }
 
-        if (packs.isEmpty()) {
-            val nestedZips = entryNames.filter { e ->
-                !e.endsWith("/") && (e.endsWith(".mcpack") || e.endsWith(".mcaddon") || e.endsWith(".zip") || e.endsWith(".mcworld") || e.endsWith(".mctemplate"))
-            }
-            if (nestedZips.isNotEmpty()) {
-                for (n in nestedZips.take(10)) {
-                    val ext = n.substringAfterLast(".", "")
-                    val guessedType = when (ext) {
-                        "mcworld", "mctemplate" -> ZipEntryType.WORLD
-                        "mcskin" -> ZipEntryType.SKIN_PACK
-                        else -> ZipEntryType.UNKNOWN
+            if (packs.isEmpty()) {
+                val nested = names.filter { e -> !e.endsWith("/") && e.contains(".") && !e.contains("/") }
+                if (nested.isNotEmpty()) {
+                    nested.take(10).forEach { n ->
+                        val t = when (n.substringAfterLast(".")) { "mcworld", "mctemplate" -> ZipEntryType.WORLD; "mcskin" -> ZipEntryType.SKIN_PACK; else -> ZipEntryType.UNKNOWN }
+                        packs.add(PackInfo(t, n.substringBeforeLast("."), n))
                     }
-                    packs.add(PackInfo(guessedType, safeName(n.substringBeforeLast(".")), n))
+                } else {
+                    val type = guessStructure(names)
+                    packs.add(PackInfo(type, file.nameWithoutExtension, ""))
                 }
-            } else {
-                val type = guessByStructure(entryNames)
-                packs.add(PackInfo(type, safeName(file.nameWithoutExtension), ""))
             }
-        }
 
-        return AnalysisResult(
-            packs = packs.distinctBy { it.subPath }.take(20),
-            totalEntryCount = totalEntries,
-            fileName = file.name,
-        )
+            if (packs.isEmpty()) return null
+            AnalysisResult(packs = packs.distinctBy { it.subPath }.take(20), totalEntryCount = names.size, fileName = file.name)
+        } catch (_: Throwable) { null }
     }
 
-    private fun packsByExtension(file: File): AnalysisResult? {
+    fun fromExtension(file: File): AnalysisResult {
         val ext = file.extension.lowercase()
         val type = when (ext) {
             "mcworld", "mctemplate" -> ZipEntryType.WORLD
             "mcskin" -> ZipEntryType.SKIN_PACK
-            "mcaddon", "mcpack", "zip" -> ZipEntryType.UNKNOWN
-            else -> return null
+            else -> ZipEntryType.UNKNOWN
         }
-        return AnalysisResult(
-            packs = listOf(PackInfo(type, safeName(file.nameWithoutExtension), "")),
-            totalEntryCount = 0,
-            fileName = file.name,
-        )
+        return AnalysisResult(listOf(PackInfo(type, file.nameWithoutExtension, "")), 0, file.name)
     }
 
-    private fun findManifestDirs(
-        entryNames: List<String>,
-        rootFiles: Set<String>,
-        subDirs: List<String>,
-    ): List<Pair<String, String>> {
-        val results = mutableListOf<Pair<String, String>>()
-        if ("manifest.json" in rootFiles) {
-            results.add("" to "manifest.json")
+    private fun findManifests(names: List<String>, rootFiles: Set<String>, subDirs: List<String>): List<Pair<String, String>> {
+        val r = mutableListOf<Pair<String, String>>()
+        if ("manifest.json" in rootFiles) r.add("" to "manifest.json")
+        subDirs.forEach { dir ->
+            val path = "$dir/manifest.json"
+            val match = names.firstOrNull { it == path || (it.startsWith("$dir/") && it.endsWith("/manifest.json")) }
+            if (match != null) r.add(dir to match)
         }
-        for (dir in subDirs) {
-            val manifestPath = "$dir/manifest.json"
-            if (entryNames.any { it == manifestPath || (it.startsWith("$dir/") && it.endsWith("/manifest.json")) }) {
-                val actualPath = entryNames.first { it.endsWith("/manifest.json") && it.startsWith("$dir/") }
-                results.add(dir to actualPath)
-            }
-        }
-        return results
+        return r
     }
 
-    private fun guessByStructure(entryNames: List<String>): ZipEntryType {
-        val score = mutableMapOf<ZipEntryType, Int>()
-        for (name in entryNames) {
-            val lower = name.lowercase()
-            when {
-                lower.startsWith("textures/") || lower.startsWith("texts/") ||
-                    lower.startsWith("sounds/") || lower.startsWith("models/") ||
-                    name.endsWith(".lang") || name.endsWith(".mcmeta") ||
-                    lower.startsWith("font/") || lower.startsWith("shaders/") ||
-                    name.endsWith(".png") && !lower.contains("skins") -> {
-                    score[ZipEntryType.RESOURCE_PACK] =
-                        score.getOrDefault(ZipEntryType.RESOURCE_PACK, 0) + 1
-                }
-                lower.startsWith("entities/") || lower.startsWith("scripts/") ||
-                    lower.startsWith("functions/") || lower.startsWith("structures/") ||
-                    name.endsWith(".mcfunction") -> {
-                    score[ZipEntryType.BEHAVIOR_PACK] =
-                        score.getOrDefault(ZipEntryType.BEHAVIOR_PACK, 0) + 1
-                }
-            }
+    private fun guessStructure(names: List<String>): ZipEntryType {
+        var rp = 0; var bp = 0
+        names.forEach { n ->
+            val l = n.lowercase()
+            if (l.startsWith("textures/") || l.startsWith("texts/") || l.startsWith("sounds/") || l.startsWith("models/") || n.endsWith(".lang") || n.endsWith(".mcmeta") || l.startsWith("font/") || l.startsWith("shaders/") || (n.endsWith(".png") && !l.contains("skins"))) rp++
+            if (l.startsWith("entities/") || l.startsWith("scripts/") || l.startsWith("functions/") || l.startsWith("structures/") || n.endsWith(".mcfunction")) bp++
         }
-        return score.maxByOrNull { it.value }?.let {
-            if (it.value > 2) it.key else ZipEntryType.UNKNOWN
-        } ?: ZipEntryType.UNKNOWN
+        return when { rp > bp && rp > 2 -> ZipEntryType.RESOURCE_PACK; bp > rp && bp > 2 -> ZipEntryType.BEHAVIOR_PACK; else -> ZipEntryType.UNKNOWN }
     }
 
-    private fun parseJsonField(json: String, field: String): String? {
-        return try {
-            Regex(""""$field"\s*:\s*"([^"]+)""").find(json)?.groupValues?.getOrNull(1)
-                ?: Regex(""""$field"\s*:\s*([^,}\s]+)""").find(json)?.groupValues?.getOrNull(1)
-        } catch (_: Exception) { null }
-    }
+    private fun jsonField(json: String, field: String): String? = try {
+        Regex(""""$field"\s*:\s*"([^"]+)""").find(json)?.groupValues?.getOrNull(1)
+            ?: Regex(""""$field"\s*:\s*([^,}\s]+)""").find(json)?.groupValues?.getOrNull(1)
+    } catch (_: Throwable) { null }
 
-    private fun parseManifestName(json: String): String? {
-        return try {
-            val header = parseJsonField(json, "header")
-            if (header != null) {
-                val nameKey = if (header.contains("\"name\"")) "name" else "Name"
-                Regex(""""$nameKey"\s*:\s*"([^"]+)""").find(header)?.groupValues?.getOrNull(1)
-            } else {
-                parseJsonField(json, "name")
-            }
-        } catch (_: Exception) { null }
-    }
+    private fun manifestName(json: String): String? = try {
+        val h = jsonField(json, "header")
+        if (h != null) {
+            val key = if (h.contains("\"name\"")) "name" else "Name"
+            Regex(""""$key"\s*:\s*"([^"]+)""").find(h)?.groupValues?.getOrNull(1)
+        } else jsonField(json, "name")
+    } catch (_: Throwable) { null }
 }

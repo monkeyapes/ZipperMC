@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -31,9 +32,6 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -48,12 +46,12 @@ import java.io.File
 fun SettingsScreen(viewModel: MainViewModel, onToggleTheme: () -> Unit) {
     val autoScan by viewModel.autoScan.collectAsState()
     val darkTheme by viewModel.darkTheme.collectAsState()
+    val eventLog by viewModel.eventLog.collectAsState()
     val context = LocalContext.current
-    var crashCount by remember { mutableStateOf(0) }
 
     val crashDir = context.filesDir
     val crashFiles = crashDir.listFiles()?.filter { it.name.startsWith("crash_") && it.name.endsWith(".log") } ?: emptyList()
-    if (crashFiles.size != crashCount) crashCount = crashFiles.size
+    val eventFile = File(crashDir, "event.log")
 
     Column(Modifier.fillMaxSize()) {
         TopAppBar(
@@ -96,6 +94,36 @@ fun SettingsScreen(viewModel: MainViewModel, onToggleTheme: () -> Unit) {
                 }
             }
 
+            if (eventFile.exists()) {
+                Spacer(Modifier.height(16.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp).clickable {
+                            try {
+                                val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", eventFile)
+                                context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }, "Share event log"))
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Share failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Default.Share, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Share event log", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                            Text("${eventLog.size} events recorded", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+
             if (crashFiles.isNotEmpty()) {
                 Spacer(Modifier.height(16.dp))
                 Card(
@@ -103,37 +131,33 @@ fun SettingsScreen(viewModel: MainViewModel, onToggleTheme: () -> Unit) {
                     shape = RoundedCornerShape(16.dp),
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                 ) {
-                    Column(Modifier.padding(4.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp).clickable {
-                                val latest = crashFiles.maxByOrNull { it.lastModified() } ?: return@clickable
-                                try {
-                                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", latest)
-                                    val intent = Intent(Intent.ACTION_SEND).apply {
-                                        type = "text/plain"
-                                        putExtra(Intent.EXTRA_STREAM, uri)
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    context.startActivity(Intent.createChooser(intent, "Share crash log"))
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "Share failed: ${e.message}", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(Icons.Default.BugReport, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.error)
-                            Spacer(Modifier.width(14.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text("Share crash logs", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.error)
-                                Text("${crashFiles.size} crash log(s) available", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp).clickable {
+                            val latest = crashFiles.maxByOrNull { it.lastModified() } ?: return@clickable
+                            try {
+                                val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", latest)
+                                context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }, "Share crash log"))
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Share failed: ${e.message}", Toast.LENGTH_SHORT).show()
                             }
+                        },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Default.BugReport, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.error)
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Share crash logs", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.error)
+                            Text("${crashFiles.size} crash log(s)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
             }
 
             Spacer(Modifier.height(24.dp))
-            Text("ZipperMC v1.6.0-beta.2", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val ver = try { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "?" } catch (_: Exception) { "?" }
+            Text("ZipperMC v$ver", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
